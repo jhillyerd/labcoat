@@ -22,3 +22,4 @@
 go.work
 
 .direnv
+debug.log

@@ -2,15 +2,28 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
+	"math"
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type model struct {
-	hosts  []string
-	cursor int
-	status map[string]string
+	hostList hostListModel
+	status   map[string]string
+	width    int
+	height   int
+}
+
+func initialModel() model {
+	return model{
+		hostList: newHostList(flakeHosts()),
+		status:   make(map[string]string),
+		width:    80,
+		height:   25,
+	}
 }
 
 type statusMsg struct {
@@ -28,67 +41,74 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
-
-		case "up", "k":
-			if m.cursor > 0 {
-				m.cursor--
-			}
-
-		case "down", "j":
-			if m.cursor < len(m.hosts)-1 {
-				m.cursor++
-			}
-
-		case "enter", " ":
-			return m, statusCmd(m.hosts[m.cursor])
-
 		}
+
 	case statusMsg:
 		m.status[msg.host] = msg.status
+		return m, nil
+
+	case statusTimeoutMsg:
+		slog.Info("status timeout", "host", msg.host)
+		return m, statusCmd(msg.host)
+
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		setHostListSize(&m.hostList, msg)
+
+		return m, nil
 	}
 
-	return m, nil
+	var cmd tea.Cmd
+	m.hostList, cmd = m.hostList.Update(msg)
+
+	return m, cmd
 }
 
 // View implements tea.Model.
 func (m model) View() string {
-	s := "Pick a host:\n\n"
+	hosts := m.hostList.View()
 
-	for i, choice := range m.hosts {
-		cursor := " "
-		if m.cursor == i {
-			cursor = ">"
+	status := "\n"
+	selected := m.hostList.Selected()
+	if selected != nil {
+		if text, ok := m.status[string(*selected)]; ok {
+			status = "Status: " + text + "\n"
 		}
-
-		s += fmt.Sprintf("%s %s\n", cursor, choice)
 	}
 
-	if status, ok := m.status[m.hosts[m.cursor]]; ok {
-		s += "\nStatus: " + status + "\n"
-	}
-
-	s += "\nPress q to quit.\n"
-
-	return s
+	return lipgloss.JoinHorizontal(lipgloss.Top, hosts, status)
 }
 
-func initialModel() model {
-	return model{
-		hosts:  flakeHosts(),
-		status: make(map[string]string),
-	}
-}
-
-func statusCmd(host string) tea.Cmd {
+func statusCmd(host hostItem) tea.Cmd {
 	return func() tea.Msg {
-		return statusMsg{host: host,
-			status: hostStatus(host),
+		return statusMsg{
+			host:   string(host),
+			status: getHostStatus(string(host)),
 		}
 	}
+}
+
+// Calcuate size of hostList based on screen dimensions.
+func setHostListSize(hl *hostListModel, msg tea.WindowSizeMsg) {
+	width := int(math.Max(10, float64(msg.Width)*0.2))
+
+	slog.Info("host list", "width", width)
+
+	hl.SetSize(width, msg.Height)
 }
 
 func main() {
-	p := tea.NewProgram(initialModel())
+	// Init logging.
+	lf, err := tea.LogToFile("debug.log", "")
+	if err != nil {
+		fmt.Println("fatal: ", err)
+		os.Exit(1)
+	}
+	defer lf.Close()
+
+	slog.Info("### STARTUP ###")
+
+	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("oops: %v", err)
 		os.Exit(1)
@@ -96,9 +116,9 @@ func main() {
 }
 
 func flakeHosts() []string {
-	return []string{"fastd", "metrics", "web"}
+	return []string{"fastd", "metrics", "longlonglonglonglonglonglonglonglonglong", "web"}
 }
 
-func hostStatus(host string) string {
+func getHostStatus(host string) string {
 	return fmt.Sprintf("meh, %q seems fine", host)
 }
