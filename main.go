@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jhillyerd/labui/internal/runner"
 )
 
 type model struct {
@@ -29,6 +30,7 @@ func initialModel() model {
 type statusMsg struct {
 	host   string
 	status string
+	runner *runner.Model
 }
 
 func (m model) Init() tea.Cmd {
@@ -36,6 +38,8 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -44,21 +48,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case statusMsg:
+		slog.Info("statusMsg", "host", msg.host)
 		m.status[msg.host] = msg.status
-		return m, nil
+		_, cmd = msg.runner.Update(nil)
+		return m, cmd
 
-	case statusTimeoutMsg:
-		slog.Info("status timeout", "host", msg.host)
-		return m, statusCmd(msg.host)
+	case statusHoverMsg:
+		slog.Info("statusHoverMsg", "host", msg.host)
+		return statusCmd(m, msg.host)
 
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		setHostListSize(&m.hostList, msg)
 
 		return m, nil
+
+	case tea.Cmd:
+		slog.Error("Got tea.Cmd instead of tea.Msg")
+		return m, nil
 	}
 
-	var cmd tea.Cmd
 	m.hostList, cmd = m.hostList.Update(msg)
 
 	return m, cmd
@@ -72,20 +81,25 @@ func (m model) View() string {
 	selected := m.hostList.Selected()
 	if selected != nil {
 		if text, ok := m.status[string(*selected)]; ok {
-			status = "Status: " + text + "\n"
+			status = text
 		}
 	}
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, hosts, status)
 }
 
-func statusCmd(host hostItem) tea.Cmd {
-	return func() tea.Msg {
+func statusCmd(m model, host hostItem) (model, tea.Cmd) {
+	onUpdate := func(r *runner.Model) tea.Msg {
+		slog.Info("statusCmd onUpdate called")
 		return statusMsg{
 			host:   string(host),
-			status: getHostStatus(string(host)),
+			status: string(r.View()),
+			runner: r,
 		}
 	}
+
+	r := runner.NewLocal(onUpdate, "/home/james/slow-script.sh")
+	return m, r.Init()
 }
 
 // Calcuate size of hostList based on screen dimensions.
@@ -106,7 +120,7 @@ func main() {
 	}
 	defer lf.Close()
 
-	slog.Info("### STARTUP ###")
+	slog.Info("### STARTUP ###################################################################")
 
 	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
@@ -117,8 +131,4 @@ func main() {
 
 func flakeHosts() []string {
 	return []string{"fastd", "metrics", "longlonglonglonglonglonglonglonglonglong", "web"}
-}
-
-func getHostStatus(host string) string {
-	return fmt.Sprintf("meh, %q seems fine", host)
 }

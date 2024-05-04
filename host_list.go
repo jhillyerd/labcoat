@@ -18,7 +18,7 @@ type hostListModel struct {
 	prevHost   hostItem    // Used to invalidate timer when the list position changes.
 }
 
-type statusTimeoutMsg struct {
+type statusHoverMsg struct {
 	host hostItem
 }
 
@@ -61,7 +61,7 @@ func (m hostListModel) Update(msg tea.Msg) (hostListModel, tea.Cmd) {
 		// Trigger status update after timeout.
 		cmd = tea.Batch(cmd, func() tea.Msg {
 			<-m.hoverTimer.C
-			return statusTimeoutMsg{*host}
+			return statusHoverMsg{*host}
 		})
 	}
 
