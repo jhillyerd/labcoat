@@ -22,8 +22,9 @@ type Model struct {
 }
 
 type layoutSizes struct {
-	hostList     dim
-	contentPanel dim
+	hostList      dim
+	contentHeader dim
+	contentPanel  dim
 }
 
 type dim struct {
@@ -128,7 +129,9 @@ func (m *Model) handleHostChange(msg hostChangedMsg) tea.Cmd {
 }
 
 var hostListStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Padding(0, 1)
-var contentPanelStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Padding(0, 1)
+var contentHeaderStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Padding(0, 1)
+var contentPanelStyle = lipgloss.NewStyle().Border(
+	lipgloss.NormalBorder(), false, true, true, true).Padding(0, 1)
 
 // View implements tea.Model.
 func (m Model) View() string {
@@ -139,14 +142,24 @@ func (m Model) View() string {
 
 	hosts := hostListStyle.Render(m.hostList.View())
 
+	host := "None"
 	status := "\n"
+	state := "Unknown"
+
 	if m.selectedHost != "" {
+		host = m.selectedHost
 		if statusRunner := m.status[m.selectedHost]; statusRunner != nil {
+			state = statusRunner.StateString()
 			status = statusRunner.View()
 		}
 	}
+
+	contentHeader := contentHeaderStyle.Render(
+		lipgloss.PlaceHorizontal(m.sizes.contentHeader.width, lipgloss.Center,
+			"Status | "+host+" | "+state))
 	m.contentPanel.SetContent(status)
-	content := contentPanelStyle.Render(m.contentPanel.View())
+	content := contentHeader + "\n" +
+		contentPanelStyle.Render(m.contentPanel.View())
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, hosts, content)
 }
@@ -167,17 +180,25 @@ func (m *Model) statusCmd(host string) tea.Cmd {
 
 // Calcuate size of hostList based on screen dimensions.
 func calculateSizes(msg tea.WindowSizeMsg) layoutSizes {
-	var s layoutSizes
-	var frameX, frameY int
+	var (
+		s           layoutSizes
+		frameWidth  int
+		frameHeight int
+	)
 
-	frameX, frameY = hostListStyle.GetFrameSize()
+	frameWidth, frameHeight = hostListStyle.GetFrameSize()
 	hostListWidth := int(math.Max(10, float64(msg.Width)*0.2))
-	s.hostList.width = hostListWidth - frameX
-	s.hostList.height = msg.Height - frameY
+	s.hostList.width = hostListWidth - frameWidth
+	s.hostList.height = msg.Height - frameHeight
 
-	frameX, frameY = contentPanelStyle.GetFrameSize()
-	s.contentPanel.width = msg.Width - hostListWidth - frameX
-	s.contentPanel.height = msg.Height - frameY
+	frameWidth, frameHeight = contentHeaderStyle.GetFrameSize()
+	contentHeaderHeight := 1 + frameHeight
+	s.contentHeader.width = msg.Width - hostListWidth - frameWidth
+	s.contentHeader.height = 1
+
+	frameWidth, frameHeight = contentPanelStyle.GetFrameSize()
+	s.contentPanel.width = msg.Width - hostListWidth - frameWidth
+	s.contentPanel.height = msg.Height - contentHeaderHeight - frameHeight
 
 	return s
 }

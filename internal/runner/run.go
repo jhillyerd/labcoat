@@ -27,7 +27,7 @@ type Model struct {
 
 	output   *buffer              // Permanent output buffer.
 	onUpdate func(*Model) tea.Msg // Construct msg when there is new output.
-	notify   chan struct{}
+	notify   chan struct{}        // Pinged when data is written to buffer.
 }
 
 // NewLocal constructs a runner for a local command.
@@ -37,11 +37,14 @@ func NewLocal(onUpdate func(*Model) tea.Msg, prog string, args ...string) *Model
 		args:     args,
 		cmd:      exec.Command(prog, args...),
 		onUpdate: onUpdate,
-		notify:   make(chan struct{}, 10),
+		notify:   make(chan struct{}, 1),
 	}
 
 	r.output = newBuffer(func() {
-		r.notify <- struct{}{}
+		select {
+		case r.notify <- struct{}{}:
+		default:
+		}
 	})
 	r.cmd.Stdout = r.output
 	r.cmd.Stderr = r.output
@@ -102,9 +105,7 @@ func (r *Model) View() string {
 	r.RLock()
 	defer r.RUnlock()
 
-	s := "[" + stateToString(r.state) + "] " + r.String() + "\n\n"
-
-	return s + r.output.String()
+	return r.String() + "\n\n" + r.output.String()
 }
 
 // String returns the requested command line.
@@ -112,6 +113,14 @@ func (r *Model) String() string {
 	parts := append([]string{}, r.prog)
 	parts = append(parts, r.args...)
 	return strings.Join(parts, " ")
+}
+
+// StateString returns the current state as a human readable string.
+func (r *Model) StateString() string {
+	r.RLock()
+	defer r.RUnlock()
+
+	return stateToString(r.state)
 }
 
 func stateToString(state int) string {
