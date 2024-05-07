@@ -3,6 +3,7 @@ package ui
 import (
 	"log/slog"
 	"math"
+	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,8 +14,10 @@ import (
 type Model struct {
 	ready        bool // true once screen size is known.
 	hostList     hostListModel
+	hoverTimer   *time.Timer // Triggers host status collection when user hovers.
+	selectedHost string
 	contentPanel viewport.Model
-	status       map[string]string
+	status       map[string]*runner.Model
 	sizes        layoutSizes
 }
 
@@ -31,7 +34,7 @@ type dim struct {
 func New(hosts []string) Model {
 	return Model{
 		hostList: newHostList(hosts),
-		status:   make(map[string]string),
+		status:   make(map[string]*runner.Model),
 	}
 }
 
@@ -41,8 +44,16 @@ type statusMsg struct {
 	runner *runner.Model
 }
 
+type hostChangedMsg struct {
+	host string
+}
+
+type hostHoverMsg struct {
+	host string
+}
+
 func (m Model) Init() tea.Cmd {
-	return nil
+	return m.hostList.Init()
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -55,15 +66,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
-	case statusMsg:
-		slog.Info("statusMsg", "host", msg.host)
-		m.status[msg.host] = msg.status
-		_, cmd = msg.runner.Update(nil)
-		return m, cmd
+	case hostChangedMsg:
+		return m, m.handleHostChange(msg)
 
-	case statusHoverMsg:
-		slog.Info("statusHoverMsg", "host", msg.host)
-		return statusCmd(m, msg.host)
+	case hostHoverMsg:
+		return m, m.statusCmd(msg.host)
+
+	case statusMsg:
+		// slog.Debug("statusMsg", "host", msg.host)
+		statusRunner, cmd := msg.runner.Update(nil)
+		m.status[msg.host] = statusRunner
+		return m, cmd
 
 	case tea.WindowSizeMsg:
 		m.sizes = calculateSizes(msg)
@@ -89,12 +102,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *Model) handleHostChange(msg hostChangedMsg) tea.Cmd {
+	slog.Debug("hostChanged", "host", msg.host)
+
+	m.selectedHost = msg.host
+
+	if m.hoverTimer != nil {
+		// Discard timer for previous host.
+		m.hoverTimer.Stop()
+		m.hoverTimer = nil
+	}
+
+	statusRunner := m.status[m.selectedHost]
+	if statusRunner != nil && statusRunner.Running() {
+		slog.Debug("status already running", "host", m.selectedHost)
+		return nil
+	}
+
+	// Trigger status update after timeout.
+	m.hoverTimer = time.NewTimer(500 * time.Millisecond)
+	return func() tea.Msg {
+		<-m.hoverTimer.C
+		return hostHoverMsg{host: msg.host}
+	}
+}
+
 var hostListStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Padding(0, 1)
 var contentPanelStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Padding(0, 1)
 
 // View implements tea.Model.
 func (m Model) View() string {
-	// Delay rendering until screen dimensions are known.
+	// Postpone rendering until screen dimensions are known.
 	if !m.ready {
 		return "\n"
 	}
@@ -102,10 +140,9 @@ func (m Model) View() string {
 	hosts := hostListStyle.Render(m.hostList.View())
 
 	status := "\n"
-	selected := m.hostList.Selected()
-	if selected != nil {
-		if text, ok := m.status[string(*selected)]; ok {
-			status = text
+	if m.selectedHost != "" {
+		if statusRunner := m.status[m.selectedHost]; statusRunner != nil {
+			status = statusRunner.View()
 		}
 	}
 	m.contentPanel.SetContent(status)
@@ -114,18 +151,18 @@ func (m Model) View() string {
 	return lipgloss.JoinHorizontal(lipgloss.Top, hosts, content)
 }
 
-func statusCmd(m Model, host hostItem) (Model, tea.Cmd) {
+func (m *Model) statusCmd(host string) tea.Cmd {
 	onUpdate := func(r *runner.Model) tea.Msg {
-		slog.Info("statusCmd onUpdate called")
+		// slog.Debug("statusCmd onUpdate called", "host", host)
+
 		return statusMsg{
-			host:   string(host),
-			status: string(r.View()),
+			host:   host,
 			runner: r,
 		}
 	}
 
 	r := runner.NewLocal(onUpdate, "/home/james/slow-script.sh")
-	return m, r.Init()
+	return r.Init()
 }
 
 // Calcuate size of hostList based on screen dimensions.

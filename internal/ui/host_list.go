@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,13 +12,8 @@ import (
 
 // hostListModel is the list of hosts to manage.
 type hostListModel struct {
-	list       list.Model
-	hoverTimer *time.Timer // Triggers host status collection when user hovers.
-	prevHost   hostItem    // Used to invalidate timer when the list position changes.
-}
-
-type statusHoverMsg struct {
-	host hostItem
+	list     list.Model
+	prevItem list.Item // Used to detect when selected host changes for hover.
 }
 
 func newHostList(hosts []string) hostListModel {
@@ -36,52 +30,35 @@ func newHostList(hosts []string) hostListModel {
 
 // Init implements tea.Model.
 func (m hostListModel) Init() tea.Cmd {
-	return nil
+	return m.handleHostChange()
 }
 
 // Update implements tea.Model.
 func (m hostListModel) Update(msg tea.Msg) (hostListModel, tea.Cmd) {
 	var cmd tea.Cmd
+
 	m.list, cmd = m.list.Update(msg)
 
-	host := m.Selected()
-	if host == nil {
-		return m, cmd
-	}
+	return m, tea.Batch(cmd, m.handleHostChange())
+}
 
-	if *host != m.prevHost {
-		// Host has changed, reset timer.
-		m.prevHost = *host
-		if m.hoverTimer != nil {
-			m.hoverTimer.Stop()
+func (m *hostListModel) handleHostChange() tea.Cmd {
+	selected := m.list.SelectedItem()
+	if selected != nil && selected != m.prevItem {
+		m.prevItem = selected
+		host := string(selected.(hostItem))
+
+		return func() tea.Msg {
+			return hostChangedMsg{host: host}
 		}
-
-		m.hoverTimer = time.NewTimer(time.Second)
-
-		// Trigger status update after timeout.
-		cmd = tea.Batch(cmd, func() tea.Msg {
-			<-m.hoverTimer.C
-			return statusHoverMsg{*host}
-		})
 	}
 
-	return m, cmd
+	return nil
 }
 
 // View implements tea.Model.
 func (m hostListModel) View() string {
 	return m.list.View()
-}
-
-// Selected returns the currently selected host, or nil.
-func (m hostListModel) Selected() *hostItem {
-	selected := m.list.SelectedItem()
-	if selected == nil {
-		return nil
-	}
-
-	host := selected.(hostItem)
-	return &host
 }
 
 // SetSize controls the size of list rendering.

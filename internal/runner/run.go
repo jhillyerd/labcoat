@@ -49,15 +49,15 @@ func NewLocal(onUpdate func(*Model) tea.Msg, prog string, args ...string) *Model
 	return r
 }
 
-func (r *Model) waitForOutput() tea.Cmd {
-	running := func() bool {
-		r.RLock()
-		defer r.RUnlock()
-		return r.state == stateNotStarted || r.state == stateRunning
-	}
+func (r *Model) Running() bool {
+	r.RLock()
+	defer r.RUnlock()
+	return r.state == stateNotStarted || r.state == stateRunning
+}
 
+func (r *Model) waitForOutput() tea.Cmd {
 	return func() tea.Msg {
-		if !running() {
+		if !r.Running() {
 			// Don't wait on completed/failed process output.
 			return nil
 		}
@@ -93,7 +93,7 @@ func (r *Model) Init() tea.Cmd {
 }
 
 // Update implements tea.Model.
-func (r *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (r *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 	return r, r.waitForOutput()
 }
 

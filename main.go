@@ -17,6 +17,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer lf.Close()
+	slog.SetLogLoggerLevel(slog.LevelDebug)
 
 	slog.Info("### STARTUP ###################################################################")
 
