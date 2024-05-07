@@ -24,6 +24,11 @@ func newHostList(hosts []string) hostListModel {
 
 	hl := list.New(items, newItemDelegate(10), 10, 10)
 	hl.Title = "Hosts"
+	hl.DisableQuitKeybindings()
+	hl.SetShowHelp(false)
+
+	hl.Styles.TitleBar.Padding(0)
+	hl.Styles.StatusBar.Padding(0, 0, 1, 0)
 
 	return hostListModel{list: hl}
 }
@@ -65,6 +70,12 @@ func (m hostListModel) View() string {
 func (m *hostListModel) SetSize(width, height int) {
 	m.list.SetSize(width, height)
 	m.list.SetDelegate(newItemDelegate(width))
+	m.list.Styles.StatusBar.Width(width)
+}
+
+// FilterState of the embedded list.
+func (m *hostListModel) FilterState() list.FilterState {
+	return m.list.FilterState()
 }
 
 // hostItem represents an entry in the host list.
@@ -80,7 +91,7 @@ type itemDelegate struct {
 }
 
 func newItemDelegate(maxWidth int) itemDelegate {
-	itemStyle := lipgloss.NewStyle().PaddingLeft(2)
+	itemStyle := lipgloss.NewStyle().PaddingLeft(1)
 	selectedItemStyle := itemStyle.Copy().PaddingLeft(0).Foreground(lipgloss.Color("170"))
 
 	return itemDelegate{
@@ -104,7 +115,7 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	fn := d.itemStyle.MaxWidth(d.maxWidth).Render
 	if index == m.Index() {
 		fn = func(s ...string) string {
-			return d.selectedItemStyle.MaxWidth(d.maxWidth).Render("> " + strings.Join(s, " "))
+			return d.selectedItemStyle.MaxWidth(d.maxWidth).Render(">" + strings.Join(s, " "))
 		}
 	}
 

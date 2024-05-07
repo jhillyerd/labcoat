@@ -5,11 +5,32 @@ import (
 	"math"
 	"time"
 
+	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jhillyerd/labui/internal/runner"
 )
+
+type KeyMap struct {
+	Up     key.Binding
+	Down   key.Binding
+	Filter key.Binding
+	Status key.Binding
+	Quit   key.Binding
+}
+
+// FullHelp implements help.KeyMap.
+func (k KeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{{k.Up, k.Down, k.Filter, k.Status, k.Quit}}
+}
+
+// ShortHelp implements help.KeyMap.
+func (k KeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Up, k.Down, k.Filter, k.Status, k.Quit}
+}
 
 type Model struct {
 	ready        bool // true once screen size is known.
@@ -19,12 +40,15 @@ type Model struct {
 	contentPanel viewport.Model
 	status       map[string]*runner.Model
 	sizes        layoutSizes
+	keys         KeyMap
+	help         help.Model
 }
 
 type layoutSizes struct {
 	hostList      dim
 	contentHeader dim
 	contentPanel  dim
+	hintBar       dim
 }
 
 type dim struct {
@@ -32,10 +56,17 @@ type dim struct {
 	height int
 }
 
-func New(hosts []string) Model {
+func New(keys KeyMap, hosts []string) Model {
+	hostList := newHostList(hosts)
+	hostList.list.KeyMap.CursorUp = keys.Up
+	hostList.list.KeyMap.CursorDown = keys.Down
+	hostList.list.KeyMap.Filter = keys.Filter
+
 	return Model{
-		hostList: newHostList(hosts),
+		hostList: hostList,
 		status:   make(map[string]*runner.Model),
+		keys:     keys,
+		help:     help.New(),
 	}
 }
 
@@ -62,6 +93,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.hostList.FilterState() == list.Filtering {
+			// User is entering filter text, disable keymaps.
+			break
+		}
+
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
@@ -132,6 +168,7 @@ var hostListStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Pa
 var contentHeaderStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Padding(0, 1)
 var contentPanelStyle = lipgloss.NewStyle().Border(
 	lipgloss.NormalBorder(), false, true, true, true).Padding(0, 1)
+var hintBarStyle = lipgloss.NewStyle().Padding(0, 1)
 
 // View implements tea.Model.
 func (m Model) View() string {
@@ -161,7 +198,9 @@ func (m Model) View() string {
 	content := contentHeader + "\n" +
 		contentPanelStyle.Render(m.contentPanel.View())
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, hosts, content)
+	hintBar := hintBarStyle.Render(m.help.View(m.keys))
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, hosts, content) + "\n" + hintBar
 }
 
 func (m *Model) statusCmd(host string) tea.Cmd {
@@ -178,27 +217,36 @@ func (m *Model) statusCmd(host string) tea.Cmd {
 	return r.Init()
 }
 
-// Calcuate size of hostList based on screen dimensions.
-func calculateSizes(msg tea.WindowSizeMsg) layoutSizes {
+// Calcuate size of panels based on window dimensions.
+func calculateSizes(win tea.WindowSizeMsg) layoutSizes {
+	const minHostListWidth = 20
+
 	var (
 		s           layoutSizes
 		frameWidth  int
 		frameHeight int
 	)
 
-	frameWidth, frameHeight = hostListStyle.GetFrameSize()
-	hostListWidth := int(math.Max(10, float64(msg.Width)*0.2))
-	s.hostList.width = hostListWidth - frameWidth
-	s.hostList.height = msg.Height - frameHeight
+	// Host list and hint bar.
+	s.hintBar.height = 1
+	hintBarHeight := s.hintBar.height + hintBarStyle.GetVerticalFrameSize()
 
+	frameWidth, frameHeight = hostListStyle.GetFrameSize()
+	hostListWidth := int(math.Max(minHostListWidth, float64(win.Width)*0.2))
+	s.hostList.width = hostListWidth - frameWidth
+	s.hostList.height = win.Height - hintBarHeight - frameHeight
+
+	s.hintBar.width = win.Width - hostListWidth - hintBarStyle.GetHorizontalFrameSize()
+
+	// Content.
 	frameWidth, frameHeight = contentHeaderStyle.GetFrameSize()
-	contentHeaderHeight := 1 + frameHeight
-	s.contentHeader.width = msg.Width - hostListWidth - frameWidth
+	s.contentHeader.width = win.Width - hostListWidth - frameWidth
 	s.contentHeader.height = 1
+	contentHeaderHeight := s.contentHeader.height + frameHeight
 
 	frameWidth, frameHeight = contentPanelStyle.GetFrameSize()
-	s.contentPanel.width = msg.Width - hostListWidth - frameWidth
-	s.contentPanel.height = msg.Height - contentHeaderHeight - frameHeight
+	s.contentPanel.width = win.Width - hostListWidth - frameWidth
+	s.contentPanel.height = win.Height - contentHeaderHeight - hintBarHeight - frameHeight
 
 	return s
 }
