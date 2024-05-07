@@ -14,16 +14,23 @@ import (
 type model struct {
 	hostList hostListModel
 	status   map[string]string
-	width    int
-	height   int
+	sizes    layoutSizes
+}
+
+type layoutSizes struct {
+	hostList     dim
+	contentPanel dim
+}
+
+type dim struct {
+	width  int
+	height int
 }
 
 func initialModel() model {
 	return model{
 		hostList: newHostList(flakeHosts()),
 		status:   make(map[string]string),
-		width:    80,
-		height:   25,
 	}
 }
 
@@ -58,8 +65,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return statusCmd(m, msg.host)
 
 	case tea.WindowSizeMsg:
-		m.width, m.height = msg.Width, msg.Height
-		setHostListSize(&m.hostList, msg)
+		m.sizes = calculateSizes(msg)
+		m.hostList.SetSize(m.sizes.hostList.width, m.sizes.hostList.height)
 
 		return m, nil
 
@@ -73,9 +80,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+var hostListStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Padding(0, 1)
+var contentPanelStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Padding(0, 1)
+
 // View implements tea.Model.
 func (m model) View() string {
-	hosts := m.hostList.View()
+	hosts := hostListStyle.Render(m.hostList.View())
 
 	status := "\n"
 	selected := m.hostList.Selected()
@@ -84,8 +94,9 @@ func (m model) View() string {
 			status = text
 		}
 	}
+	content := contentPanelStyle.Render(status)
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, hosts, status)
+	return lipgloss.JoinHorizontal(lipgloss.Top, hosts, content)
 }
 
 func statusCmd(m model, host hostItem) (model, tea.Cmd) {
@@ -103,12 +114,19 @@ func statusCmd(m model, host hostItem) (model, tea.Cmd) {
 }
 
 // Calcuate size of hostList based on screen dimensions.
-func setHostListSize(hl *hostListModel, msg tea.WindowSizeMsg) {
-	width := int(math.Max(10, float64(msg.Width)*0.2))
+func calculateSizes(msg tea.WindowSizeMsg) layoutSizes {
+	var s layoutSizes
+	var frameX, frameY int
 
-	slog.Info("host list", "width", width)
+	frameX, frameY = hostListStyle.GetFrameSize()
+	s.hostList.width = int(math.Max(10, float64(msg.Width)*0.2)) - frameX
+	s.hostList.height = msg.Height - frameY
 
-	hl.SetSize(width, msg.Height)
+	frameX, frameY = contentPanelStyle.GetFrameSize()
+	s.contentPanel.width = int(math.Max(10, float64(msg.Width)*0.2)) - frameX
+	s.contentPanel.height = msg.Height - frameY
+
+	return s
 }
 
 func main() {
