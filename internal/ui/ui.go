@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -42,6 +43,7 @@ type Model struct {
 	sizes        layoutSizes
 	keys         KeyMap
 	help         help.Model
+	spinner      spinner.Model
 }
 
 type layoutSizes struct {
@@ -62,11 +64,16 @@ func New(keys KeyMap, hosts []string) Model {
 	hostList.list.KeyMap.CursorDown = keys.Down
 	hostList.list.KeyMap.Filter = keys.Filter
 
+	spin := spinner.New()
+	spin.Spinner = spinner.MiniDot
+	spin.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#80c080"))
+
 	return Model{
 		hostList: hostList,
 		status:   make(map[string]*runner.Model),
 		keys:     keys,
 		help:     help.New(),
+		spinner:  spin,
 	}
 }
 
@@ -85,11 +92,17 @@ type hostHoverMsg struct {
 }
 
 func (m Model) Init() tea.Cmd {
-	return m.hostList.Init()
+	return tea.Batch(
+		m.hostList.Init(),
+		m.spinner.Tick,
+	)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
+	var (
+		cmd  tea.Cmd
+		cmds []tea.Cmd
+	)
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -135,8 +148,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	m.hostList, cmd = m.hostList.Update(msg)
+	cmds = append(cmds, cmd)
 
-	return m, cmd
+	m.spinner, cmd = m.spinner.Update(msg)
+	cmds = append(cmds, cmd)
+
+	return m, tea.Batch(cmds...)
 }
 
 func (m *Model) handleHostChange(msg hostChangedMsg) tea.Cmd {
@@ -164,6 +181,12 @@ func (m *Model) handleHostChange(msg hostChangedMsg) tea.Cmd {
 	}
 }
 
+var subtleColor = lipgloss.Color("241")
+var labelFgColor = lipgloss.Color("230")
+var labelBgColor = lipgloss.Color("62")
+var scriptLabelStyle = lipgloss.NewStyle().MarginTop(1).Padding(0, 1).
+	Foreground(labelFgColor).Background(labelBgColor)
+
 var hostListStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Padding(0, 1)
 var contentHeaderStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Padding(0, 1)
 var contentPanelStyle = lipgloss.NewStyle().Border(
@@ -187,7 +210,18 @@ func (m Model) View() string {
 		host = m.selectedHost
 		if statusRunner := m.status[m.selectedHost]; statusRunner != nil {
 			state = statusRunner.StateString()
-			status = statusRunner.View()
+
+			status = lipgloss.NewStyle().Foreground(subtleColor).Render(
+				statusRunner.String() + " @ " + statusRunner.Destination())
+			status += "\n"
+
+			// TODO inefficient, cache this.
+			status += runner.FormatOutput(statusRunner.View(),
+				func(s string) string { return scriptLabelStyle.Render(s) })
+
+			if statusRunner.Running() {
+				status += m.spinner.View()
+			}
 		}
 	}
 
@@ -213,7 +247,14 @@ func (m *Model) statusCmd(host string) tea.Cmd {
 		}
 	}
 
-	r := runner.NewLocal(onUpdate, "/home/james/slow-script.sh")
+	// r := runner.NewLocal(onUpdate, "/home/james/slow-script.sh")
+	// r := runner.NewRemote(onUpdate, host, "root", "df", "-h")
+
+	cmds := []string{"systemctl --failed", "uname -a", "df -h"}
+	script := runner.NewScript(cmds)
+	r := runner.NewRemoteScript(onUpdate, host, "root", "host status (script)", script)
+	m.status[host] = r
+
 	return r.Init()
 }
 

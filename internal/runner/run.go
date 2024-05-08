@@ -21,6 +21,7 @@ type Model struct {
 	sync.RWMutex
 	prog  string
 	args  []string
+	dest  string
 	cmd   *exec.Cmd
 	state int
 	err   error
@@ -35,6 +36,7 @@ func NewLocal(onUpdate func(*Model) tea.Msg, prog string, args ...string) *Model
 	r := &Model{
 		prog:     prog,
 		args:     args,
+		dest:     "local",
 		cmd:      exec.Command(prog, args...),
 		onUpdate: onUpdate,
 		notify:   make(chan struct{}, 1),
@@ -48,6 +50,48 @@ func NewLocal(onUpdate func(*Model) tea.Msg, prog string, args ...string) *Model
 	})
 	r.cmd.Stdout = r.output
 	r.cmd.Stderr = r.output
+
+	return r
+}
+
+func NewRemote(
+	onUpdate func(*Model) tea.Msg, host string, user string,
+	prog string, args ...string,
+) *Model {
+	dest := "ssh://"
+	if user != "" {
+		dest += user + "@"
+	}
+	dest += host
+
+	sshArgs := []string{"-T", "-oBatchMode=yes", dest, prog}
+	sshArgs = append(sshArgs, args...)
+
+	r := NewLocal(onUpdate, "ssh", sshArgs...)
+	r.prog = prog
+	r.args = args
+	r.dest = dest
+
+	return r
+}
+
+func NewRemoteScript(
+	onUpdate func(*Model) tea.Msg, host string, user string,
+	name string, script string,
+) *Model {
+	dest := "ssh://"
+	if user != "" {
+		dest += user + "@"
+	}
+	dest += host
+
+	sshArgs := []string{"-T", "-oBatchMode=yes", dest, "bash", "-s"}
+
+	r := NewLocal(onUpdate, "ssh", sshArgs...)
+	r.prog = name
+	r.args = []string{}
+	r.dest = dest
+	r.cmd.Stdin = strings.NewReader(script)
 
 	return r
 }
@@ -77,7 +121,7 @@ func (r *Model) Init() tea.Cmd {
 		r.state = stateRunning
 		r.Unlock()
 
-		slog.Info("running", "cmd", r)
+		slog.Info("running", "cmd", r, "dest", r.dest)
 
 		r.err = r.cmd.Run()
 
@@ -105,7 +149,12 @@ func (r *Model) View() string {
 	r.RLock()
 	defer r.RUnlock()
 
-	return r.String() + "\n\n" + r.output.String()
+	return r.output.String()
+}
+
+// Destination returns the SSH URL or `local`.
+func (r *Model) Destination() string {
+	return r.dest
 }
 
 // String returns the requested command line.
