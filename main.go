@@ -1,12 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/jhillyerd/labui/internal/nix"
 	"github.com/jhillyerd/labui/internal/ui"
 )
 
@@ -45,13 +47,24 @@ func main() {
 
 	slog.Info("### STARTUP ###################################################################")
 
-	p := tea.NewProgram(ui.New(DefaultKeyMap, flakeHosts()), tea.WithAltScreen())
+	// Load host list.
+	output, nerr := nix.RunNames(nix.NamesData{FlakePath: "/home/james/devel/homelab/nixos"})
+	if nerr != nil {
+		fmt.Println(nerr.Detail())
+		os.Exit(1)
+	}
+
+	var hosts []string
+	if err := json.Unmarshal(output, &hosts); err != nil {
+		fmt.Println("Failed to parse host list:", err)
+		fmt.Println("\nJSON input:")
+		fmt.Println(string(output))
+		os.Exit(1)
+	}
+
+	p := tea.NewProgram(ui.New(DefaultKeyMap, hosts), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("oops: %v", err)
 		os.Exit(1)
 	}
-}
-
-func flakeHosts() []string {
-	return []string{"fastd", "metrics", "longlonglonglonglonglonglonglonglonglong", "web"}
 }

@@ -115,7 +115,7 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	fn := d.itemStyle.MaxWidth(d.maxWidth).Render
 	if index == m.Index() {
 		fn = func(s ...string) string {
-			return d.selectedItemStyle.MaxWidth(d.maxWidth).Render(">" + strings.Join(s, " "))
+			return d.selectedItemStyle.MaxWidth(d.maxWidth).Render("»" + strings.Join(s, " "))
 		}
 	}
 
