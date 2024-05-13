@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"log/slog"
 	"math"
 	"time"
@@ -16,11 +17,15 @@ import (
 )
 
 type KeyMap struct {
-	Up     key.Binding
-	Down   key.Binding
-	Filter key.Binding
-	Status key.Binding
-	Quit   key.Binding
+	Up         key.Binding
+	Down       key.Binding
+	Left       key.Binding
+	Right      key.Binding
+	ScrollUp   key.Binding
+	ScrollDown key.Binding
+	Filter     key.Binding
+	Status     key.Binding
+	Quit       key.Binding
 }
 
 // FullHelp implements help.KeyMap.
@@ -36,14 +41,23 @@ func (k KeyMap) ShortHelp() []key.Binding {
 type Model struct {
 	ready        bool // true once screen size is known.
 	hostList     hostListModel
+	hosts        map[string]*hostModel
+	selectedHost *hostModel
 	hoverTimer   *time.Timer // Triggers host status collection when user hovers.
-	selectedHost string
 	contentPanel viewport.Model
-	status       map[string]*runner.Model
 	sizes        layoutSizes
 	keys         KeyMap
 	help         help.Model
 	spinner      spinner.Model
+}
+
+type hostModel struct {
+	name   string
+	status struct {
+		intro    string // Rendered intro text: command, host, etc.
+		rendered string // Rendered status content cache.
+		runner   *runner.Model
+	}
 }
 
 type layoutSizes struct {
@@ -58,37 +72,42 @@ type dim struct {
 	height int
 }
 
-func New(keys KeyMap, hosts []string) Model {
-	hostList := newHostList(hosts)
+func New(keys KeyMap, hostNames []string) Model {
+	hostList := newHostList(hostNames)
 	hostList.list.KeyMap.CursorUp = keys.Up
 	hostList.list.KeyMap.CursorDown = keys.Down
 	hostList.list.KeyMap.Filter = keys.Filter
+	hostList.list.KeyMap.NextPage = keys.Right
+	hostList.list.KeyMap.PrevPage = keys.Left
 
 	spin := spinner.New()
 	spin.Spinner = spinner.MiniDot
 	spin.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#80c080"))
 
+	hosts := make(map[string]*hostModel, len(hostNames))
+	for _, v := range hostNames {
+		hosts[v] = &hostModel{name: v}
+	}
+
 	return Model{
 		hostList: hostList,
-		status:   make(map[string]*runner.Model),
+		hosts:    hosts,
 		keys:     keys,
 		help:     help.New(),
 		spinner:  spin,
 	}
 }
 
-type statusMsg struct {
-	host   string
-	status string
-	runner *runner.Model
+type hostStatusMsg struct {
+	hostName string
 }
 
 type hostChangedMsg struct {
-	host string
+	hostName string
 }
 
 type hostHoverMsg struct {
-	host string
+	hostName string
 }
 
 func (m Model) Init() tea.Cmd {
@@ -106,6 +125,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		slog.Debug("tea.KeyMsg", "key", msg)
+
 		if m.hostList.FilterState() == list.Filtering {
 			// User is entering filter text, disable keymaps.
 			break
@@ -117,16 +138,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case hostChangedMsg:
-		return m, m.handleHostChange(msg)
+		return m, m.handleHostChangedMsg(msg)
 
 	case hostHoverMsg:
-		return m, m.statusCmd(msg.host)
+		return m, m.handleHostHoverMsg(msg)
 
-	case statusMsg:
-		// slog.Debug("statusMsg", "host", msg.host)
-		statusRunner, cmd := msg.runner.Update(nil)
-		m.status[msg.host] = statusRunner
-		return m, cmd
+	case hostStatusMsg:
+		return m, m.handleHostStatusMsg(msg)
 
 	case tea.WindowSizeMsg:
 		m.sizes = calculateSizes(msg)
@@ -137,7 +155,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.contentPanel.Height = m.sizes.contentPanel.height
 		} else {
 			// First size message, init content viewport.
-			m.contentPanel = viewport.New(m.sizes.contentPanel.width, m.sizes.contentPanel.height)
+			m.initContentPanel()
 			m.ready = true
 		}
 		return m, nil
@@ -150,16 +168,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.hostList, cmd = m.hostList.Update(msg)
 	cmds = append(cmds, cmd)
 
+	m.contentPanel, cmd = m.contentPanel.Update(msg)
+	cmds = append(cmds, cmd)
+
 	m.spinner, cmd = m.spinner.Update(msg)
 	cmds = append(cmds, cmd)
 
 	return m, tea.Batch(cmds...)
 }
 
-func (m *Model) handleHostChange(msg hostChangedMsg) tea.Cmd {
-	slog.Debug("hostChanged", "host", msg.host)
+func (m *Model) initContentPanel() {
+	cp := viewport.New(m.sizes.contentPanel.width, m.sizes.contentPanel.height)
+	cp.KeyMap.PageUp = m.keys.ScrollUp
+	cp.KeyMap.PageDown = m.keys.ScrollDown
 
-	m.selectedHost = msg.host
+	cp.KeyMap.Up = key.NewBinding(key.WithDisabled())
+	cp.KeyMap.Down = key.NewBinding(key.WithDisabled())
+	cp.KeyMap.HalfPageUp = key.NewBinding(key.WithDisabled())
+	cp.KeyMap.HalfPageDown = key.NewBinding(key.WithDisabled())
+
+	m.contentPanel = cp
+}
+
+func (m *Model) handleHostChangedMsg(msg hostChangedMsg) tea.Cmd {
+	slog.Debug("hostChanged", "host", msg.hostName)
+
+	m.selectedHost = m.hosts[msg.hostName]
+	m.contentPanel.SetContent(m.hosts[msg.hostName].status.rendered)
 
 	if m.hoverTimer != nil {
 		// Discard timer for previous host.
@@ -167,18 +202,65 @@ func (m *Model) handleHostChange(msg hostChangedMsg) tea.Cmd {
 		m.hoverTimer = nil
 	}
 
-	statusRunner := m.status[m.selectedHost]
+	// Do nothing if status is already running.
+	statusRunner := m.selectedHost.status.runner
 	if statusRunner != nil && statusRunner.Running() {
-		slog.Debug("status already running", "host", m.selectedHost)
 		return nil
 	}
 
-	// Trigger status update after timeout.
+	// Trigger fetch status after timeout.
 	m.hoverTimer = time.NewTimer(500 * time.Millisecond)
 	return func() tea.Msg {
 		<-m.hoverTimer.C
-		return hostHoverMsg{host: msg.host}
+		return hostHoverMsg{hostName: msg.hostName}
 	}
+}
+
+func (m *Model) handleHostHoverMsg(msg hostHoverMsg) tea.Cmd {
+	hostName := msg.hostName
+
+	onUpdate := func(r *runner.Model) tea.Msg {
+		// Sent when the runner has new output to display.
+		return hostStatusMsg{hostName: hostName}
+	}
+
+	script := runner.NewScript([]string{"systemctl --failed", "uname -a", "df -h"})
+	srunner := runner.NewRemoteScript(onUpdate, hostName, "root", "host status (script)", script)
+
+	host := m.hosts[hostName]
+	host.status.runner = srunner
+
+	// Init status display.
+	intro := lipgloss.NewStyle().
+		Foreground(subtleColor).
+		Render(srunner.String()+" @ "+srunner.Destination()) + "\n"
+	host.status.intro = intro
+	host.status.rendered = intro
+	m.contentPanel.SetContent(intro)
+
+	return srunner.Init()
+}
+
+func (m *Model) handleHostStatusMsg(msg hostStatusMsg) tea.Cmd {
+	slog.Debug("statusMsg", "host", msg.hostName)
+
+	host := m.hosts[msg.hostName]
+	srunner := host.status.runner
+	_, cmd := srunner.Update(nil)
+
+	// Render and cache status content.
+	status := host.status.intro
+	status += runner.FormatOutput(
+		srunner.View(),
+		func(s string) string { return scriptLabelStyle.Render(s) })
+	host.status.rendered = status
+
+	if m.selectedHost == host {
+		// User is currently viewing the host receiving this status, update the panel content.
+		m.contentPanel.SetContent(status)
+	}
+
+	return cmd
 }
 
 var subtleColor = lipgloss.Color("241")
@@ -202,60 +284,28 @@ func (m Model) View() string {
 
 	hosts := hostListStyle.Render(m.hostList.View())
 
-	host := "None"
-	status := "\n"
+	hostName := "None"
 	state := "Unknown"
+	scroll := "---%"
 
-	if m.selectedHost != "" {
-		host = m.selectedHost
-		if statusRunner := m.status[m.selectedHost]; statusRunner != nil {
-			state = statusRunner.StateString()
-
-			status = lipgloss.NewStyle().Foreground(subtleColor).Render(
-				statusRunner.String() + " @ " + statusRunner.Destination())
-			status += "\n"
-
-			// TODO inefficient, cache this.
-			status += runner.FormatOutput(statusRunner.View(),
-				func(s string) string { return scriptLabelStyle.Render(s) })
-
-			if statusRunner.Running() {
-				status += m.spinner.View()
-			}
+	if m.selectedHost != nil {
+		hostName = m.selectedHost.name
+		if sr := m.selectedHost.status.runner; sr != nil {
+			state = sr.StateString()
 		}
 	}
 
+	scroll = fmt.Sprintf("%3.0f%%", m.contentPanel.ScrollPercent()*100)
+
 	contentHeader := contentHeaderStyle.Render(
 		lipgloss.PlaceHorizontal(m.sizes.contentHeader.width, lipgloss.Center,
-			"Status | "+host+" | "+state))
-	m.contentPanel.SetContent(status)
+			"Status | "+hostName+" | "+state+" | Scroll: "+scroll))
 	content := contentHeader + "\n" +
 		contentPanelStyle.Render(m.contentPanel.View())
 
 	hintBar := hintBarStyle.Render(m.help.View(m.keys))
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, hosts, content) + "\n" + hintBar
-}
-
-func (m *Model) statusCmd(host string) tea.Cmd {
-	onUpdate := func(r *runner.Model) tea.Msg {
-		// slog.Debug("statusCmd onUpdate called", "host", host)
-
-		return statusMsg{
-			host:   host,
-			runner: r,
-		}
-	}
-
-	// r := runner.NewLocal(onUpdate, "/home/james/slow-script.sh")
-	// r := runner.NewRemote(onUpdate, host, "root", "df", "-h")
-
-	cmds := []string{"systemctl --failed", "uname -a", "df -h"}
-	script := runner.NewScript(cmds)
-	r := runner.NewRemoteScript(onUpdate, host, "root", "host status (script)", script)
-	m.status[host] = r
-
-	return r.Init()
 }
 
 // Calcuate size of panels based on window dimensions.

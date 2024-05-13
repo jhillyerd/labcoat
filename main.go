@@ -21,6 +21,22 @@ var DefaultKeyMap = ui.KeyMap{
 		key.WithKeys("j", "down"),
 		key.WithHelp("↓/j", "down"),
 	),
+	Left: key.NewBinding(
+		key.WithKeys("h", "left"),
+		key.WithHelp("←/h", "left"),
+	),
+	Right: key.NewBinding(
+		key.WithKeys("l", "right"),
+		key.WithHelp("→/l", "right"),
+	),
+	ScrollUp: key.NewBinding(
+		key.WithKeys("pgup"),
+		key.WithHelp("PgUp", "scroll up"),
+	),
+	ScrollDown: key.NewBinding(
+		key.WithKeys("pgdown"),
+		key.WithHelp("PgDn", "scroll down"),
+	),
 	Filter: key.NewBinding(
 		key.WithKeys("/"),
 		key.WithHelp("/", "filter hosts"),
@@ -64,7 +80,7 @@ func main() {
 
 	p := tea.NewProgram(ui.New(DefaultKeyMap, hosts), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
-		fmt.Printf("oops: %v", err)
+		fmt.Println(err)
 		os.Exit(1)
 	}
 }

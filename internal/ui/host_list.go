@@ -54,7 +54,7 @@ func (m *hostListModel) handleHostChange() tea.Cmd {
 		host := string(selected.(hostItem))
 
 		return func() tea.Msg {
-			return hostChangedMsg{host: host}
+			return hostChangedMsg{hostName: host}
 		}
 	}
 
