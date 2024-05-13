@@ -64,7 +64,8 @@ func main() {
 	slog.Info("### STARTUP ###################################################################")
 
 	// Load host list.
-	output, nerr := nix.RunNames(nix.NamesData{FlakePath: "/home/james/devel/homelab/nixos"})
+	flakePath := "/home/james/devel/homelab/nixos"
+	output, nerr := nix.RunNames(nix.NamesData{FlakePath: flakePath})
 	if nerr != nil {
 		fmt.Println(nerr.Detail())
 		os.Exit(1)
@@ -78,7 +79,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	p := tea.NewProgram(ui.New(DefaultKeyMap, hosts), tea.WithAltScreen())
+	p := tea.NewProgram(ui.New(DefaultKeyMap, flakePath, hosts), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)

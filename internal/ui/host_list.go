@@ -35,6 +35,7 @@ func newHostList(hosts []string) hostListModel {
 
 // Init implements tea.Model.
 func (m hostListModel) Init() tea.Cmd {
+	// TODO causes dup hostChangedMsgs due to `m` being read-only in Init.
 	return m.handleHostChange()
 }
 

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"math"
@@ -13,6 +14,8 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jhillyerd/labui/internal/nix"
+	"github.com/jhillyerd/labui/internal/npool"
 	"github.com/jhillyerd/labui/internal/runner"
 )
 
@@ -40,10 +43,12 @@ func (k KeyMap) ShortHelp() []key.Binding {
 
 type Model struct {
 	ready        bool // true once screen size is known.
+	flakePath    string
 	hostList     hostListModel
 	hosts        map[string]*hostModel
 	selectedHost *hostModel
 	hoverTimer   *time.Timer // Triggers host status collection when user hovers.
+	nixPool      *npool.Pool
 	contentPanel viewport.Model
 	sizes        layoutSizes
 	keys         KeyMap
@@ -53,6 +58,7 @@ type Model struct {
 
 type hostModel struct {
 	name   string
+	target *nix.TargetInfo // Cached info about target host.
 	status struct {
 		intro    string // Rendered intro text: command, host, etc.
 		rendered string // Rendered status content cache.
@@ -72,7 +78,7 @@ type dim struct {
 	height int
 }
 
-func New(keys KeyMap, hostNames []string) Model {
+func New(keys KeyMap, flakePath string, hostNames []string) Model {
 	hostList := newHostList(hostNames)
 	hostList.list.KeyMap.CursorUp = keys.Up
 	hostList.list.KeyMap.CursorDown = keys.Down
@@ -90,12 +96,19 @@ func New(keys KeyMap, hostNames []string) Model {
 	}
 
 	return Model{
-		hostList: hostList,
-		hosts:    hosts,
-		keys:     keys,
-		help:     help.New(),
-		spinner:  spin,
+		flakePath: flakePath,
+		hostList:  hostList,
+		hosts:     hosts,
+		nixPool:   npool.New("nix", 2),
+		keys:      keys,
+		help:      help.New(),
+		spinner:   spin,
 	}
+}
+
+type hostTargetInfoMsg struct {
+	hostName string
+	target   nix.TargetInfo
 }
 
 type hostStatusMsg struct {
@@ -142,6 +155,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case hostHoverMsg:
 		return m, m.handleHostHoverMsg(msg)
+
+	case hostTargetInfoMsg:
+		return m, m.handleHostTargetInfoMsg(msg)
 
 	case hostStatusMsg:
 		return m, m.handleHostStatusMsg(msg)
@@ -217,15 +233,61 @@ func (m *Model) handleHostChangedMsg(msg hostChangedMsg) tea.Cmd {
 }
 
 func (m *Model) handleHostHoverMsg(msg hostHoverMsg) tea.Cmd {
+	const getNixWorkerTimeout = 30 * time.Second
+
 	hostName := msg.hostName
 
+	host := m.hosts[hostName]
+
+	// Init status display.
+	intro := lipgloss.NewStyle().
+		Foreground(subtleColor).
+		Render("Querying nix for information on "+hostName) + "\n"
+	host.status.intro = intro
+	host.status.rendered = intro
+	m.contentPanel.SetContent(intro)
+
+	return func() tea.Msg {
+		ctx, done := context.WithTimeout(context.Background(), getNixWorkerTimeout)
+		defer done()
+
+		worker, err := m.nixPool.Get(ctx)
+		if err != nil {
+			slog.Error("failed to get nix worker", "err", err, "timeout", getNixWorkerTimeout)
+			return nil
+		}
+		defer worker.Done()
+
+		slog.Info("Fetching target info from nix", "host", hostName, "worker", worker)
+		targetInfo, nerr := nix.GetTargetInfo(nix.TargetInfoRequest{
+			FlakePath: m.flakePath,
+			HostName:  hostName,
+		})
+		if nerr != nil {
+			slog.Error("Failed to fetch target info",
+				"host", hostName, "worker", worker, "err", nerr, "detail", nerr.Detail())
+			return nil
+		}
+		slog.Info("targetInfo", "info", targetInfo)
+
+		return hostTargetInfoMsg{hostName: hostName, target: *targetInfo}
+	}
+}
+
+func (m *Model) handleHostTargetInfoMsg(msg hostTargetInfoMsg) tea.Cmd {
+	hostName := msg.hostName
+	target := &msg.target
+	m.hosts[hostName].target = target
+
+	// Fetch host status now that we know target deployHost.
 	onUpdate := func(r *runner.Model) tea.Msg {
 		// Sent when the runner has new output to display.
 		return hostStatusMsg{hostName: hostName}
 	}
 
 	script := runner.NewScript([]string{"systemctl --failed", "uname -a", "df -h"})
-	srunner := runner.NewRemoteScript(onUpdate, hostName, "root", "host status (script)", script)
+	srunner := runner.NewRemoteScript(
+		onUpdate, target.DeployHost, "root", "host status (script)", script)
 
 	host := m.hosts[hostName]
 	host.status.runner = srunner
@@ -242,8 +304,6 @@ func (m *Model) handleHostHoverMsg(msg hostHoverMsg) tea.Cmd {
 }
 
 func (m *Model) handleHostStatusMsg(msg hostStatusMsg) tea.Cmd {
-	slog.Debug("statusMsg", "host", msg.hostName)
-
 	host := m.hosts[msg.hostName]
 	srunner := host.status.runner
 	_, cmd := srunner.Update(nil)
