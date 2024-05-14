@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -55,33 +54,25 @@ func main() {
 	// Init logging.
 	lf, err := tea.LogToFile("debug.log", "")
 	if err != nil {
-		fmt.Println("fatal: ", err)
+		fmt.Fprintln(os.Stderr, "logging error: ", err)
 		os.Exit(1)
 	}
 	defer lf.Close()
-	slog.SetLogLoggerLevel(slog.LevelDebug)
 
+	slog.SetLogLoggerLevel(slog.LevelDebug)
 	slog.Info("### STARTUP ###################################################################")
 
 	// Load host list.
 	flakePath := "/home/james/devel/homelab/nixos"
-	output, nerr := nix.RunNames(nix.NamesData{FlakePath: flakePath})
+	hosts, nerr := nix.GetNames(nix.NamesRequest{FlakePath: flakePath})
 	if nerr != nil {
-		fmt.Println(nerr.Detail())
-		os.Exit(1)
-	}
-
-	var hosts []string
-	if err := json.Unmarshal(output, &hosts); err != nil {
-		fmt.Println("Failed to parse host list:", err)
-		fmt.Println("\nJSON input:")
-		fmt.Println(string(output))
+		fmt.Fprintln(os.Stderr, nerr.Error())
 		os.Exit(1)
 	}
 
 	p := tea.NewProgram(ui.New(DefaultKeyMap, flakePath, hosts), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
 }

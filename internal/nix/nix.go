@@ -18,12 +18,22 @@ const namesScript = `
 
 var namesTmpl = template.Must(template.New("names").Parse(namesScript))
 
-type NamesData struct {
+type NamesRequest struct {
 	FlakePath string
 }
 
-func RunNames(data NamesData) ([]byte, *Error) {
-	return runScript(namesTmpl, data)
+func GetNames(data NamesRequest) ([]string, error) {
+	output, err := runScript(namesTmpl, data)
+	if err != nil {
+		return nil, err
+	}
+
+	var names []string
+	if err := json.Unmarshal(output, &names); err != nil {
+		return nil, fmt.Errorf("nix decode failed: %w\n\nJSON output:\n%s", err, string(output))
+	}
+
+	return names, nil
 }
 
 const targetInfoScript = `
@@ -49,7 +59,7 @@ type TargetInfo struct {
 	DeployHost string `json:"deployHost"`
 }
 
-func GetTargetInfo(data TargetInfoRequest) (*TargetInfo, *Error) {
+func GetTargetInfo(data TargetInfoRequest) (*TargetInfo, error) {
 	output, err := runScript(targetInfoTmpl, data)
 	if err != nil {
 		return nil, err
@@ -57,21 +67,21 @@ func GetTargetInfo(data TargetInfoRequest) (*TargetInfo, *Error) {
 
 	var targetInfo TargetInfo
 	if err := json.Unmarshal(output, &targetInfo); err != nil {
-		return nil, newJSONError(err, output)
+		return nil, fmt.Errorf("nix decode failed: %w\n\nJSON output:\n%s", err, string(output))
 	}
 
 	return &targetInfo, nil
 }
 
-func runScript(tmpl *template.Template, data any) ([]byte, *Error) {
+func runScript(tmpl *template.Template, data any) ([]byte, error) {
 	// Render script.
 	var scriptBuf bytes.Buffer
 	if err := tmpl.Execute(&scriptBuf, data); err != nil {
-		return nil, newNixError(err, []byte(namesScript))
+		return nil, fmt.Errorf("nix template render: %w", err)
 	}
 	script, err := io.ReadAll(&scriptBuf)
 	if err != nil {
-		return nil, newNixError(err, []byte(namesScript))
+		return nil, fmt.Errorf("nix template read: %w", err)
 	}
 
 	// Pass script to nix cmd.
@@ -80,60 +90,14 @@ func runScript(tmpl *template.Template, data any) ([]byte, *Error) {
 
 	output, err := cmd.Output()
 	if err != nil {
-		return nil, newNixError(err, script)
+		output := ""
+		if exit, ok := err.(*exec.ExitError); ok {
+			output = "\n\nOutput:\n"
+			output += string(exit.Stderr)
+		}
+
+		return nil, fmt.Errorf("nix run failed: %w\n\nScript:\n%s%s", err, string(script), output)
 	}
 
 	return output, nil
-}
-
-type Error struct {
-	Cause  error
-	Script []byte
-	JSON   []byte
-}
-
-func newNixError(cause error, script []byte) *Error {
-	return &Error{
-		Cause:  cause,
-		Script: script,
-	}
-}
-
-func newJSONError(cause error, json []byte) *Error {
-	return &Error{
-		Cause: cause,
-		JSON:  json,
-	}
-}
-
-func (e Error) Error() string {
-	return e.Cause.Error()
-}
-
-func (e Error) Detail() string {
-	var out string
-
-	switch err := e.Cause.(type) {
-	case *exec.ExitError:
-		out = fmt.Sprintf("nix failed, exit code %v\n", err.ExitCode())
-		out += string(err.Stderr)
-
-	case *json.UnmarshalTypeError, *json.SyntaxError:
-		out = fmt.Sprintf("JSON decode failed: %s", err.Error())
-
-	default:
-		out += fmt.Sprintf("nix run failed, %T: %v\n", err, err)
-	}
-
-	if e.Script != nil {
-		out += "\n\nscript source:\n"
-		out += string(e.Script)
-	}
-
-	if e.JSON != nil {
-		out += "\n\nJSON source:\n"
-		out += string(e.JSON)
-	}
-
-	return out
 }

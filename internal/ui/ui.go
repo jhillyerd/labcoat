@@ -19,6 +19,11 @@ import (
 	"github.com/jhillyerd/labui/internal/runner"
 )
 
+const (
+	viewModeHosts = iota
+	viewModeError
+)
+
 type KeyMap struct {
 	Up         key.Binding
 	Down       key.Binding
@@ -43,6 +48,7 @@ func (k KeyMap) ShortHelp() []key.Binding {
 
 type Model struct {
 	ready        bool // true once screen size is known.
+	viewMode     int  // Current UI mode.
 	flakePath    string
 	hostList     hostListModel
 	hosts        map[string]*hostModel
@@ -54,6 +60,7 @@ type Model struct {
 	keys         KeyMap
 	help         help.Model
 	spinner      spinner.Model
+	error        string
 }
 
 type hostModel struct {
@@ -96,6 +103,7 @@ func New(keys KeyMap, flakePath string, hostNames []string) Model {
 	}
 
 	return Model{
+		viewMode:  viewModeHosts,
 		flakePath: flakePath,
 		hostList:  hostList,
 		hosts:     hosts,
@@ -123,6 +131,10 @@ type hostHoverMsg struct {
 	hostName string
 }
 
+type criticalErrorMsg struct {
+	detail string
+}
+
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.hostList.Init(),
@@ -139,6 +151,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		slog.Debug("tea.KeyMsg", "key", msg)
+
+		if m.viewMode == viewModeError {
+			// Error display is modal, swallow all key press messages.
+			if msg.String() == "esc" {
+				// Exit error display.
+				m.viewMode = viewModeHosts
+			}
+
+			return m, nil
+		}
 
 		if m.hostList.FilterState() == list.Filtering {
 			// User is entering filter text, disable keymaps.
@@ -175,6 +197,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ready = true
 		}
 		return m, nil
+
+	case criticalErrorMsg:
+		m.viewMode = viewModeError
+		m.error = msg.detail
 
 	case tea.Cmd:
 		slog.Error("Got tea.Cmd instead of tea.Msg")
@@ -264,9 +290,9 @@ func (m *Model) handleHostHoverMsg(msg hostHoverMsg) tea.Cmd {
 			HostName:  hostName,
 		})
 		if nerr != nil {
-			slog.Error("Failed to fetch target info",
-				"host", hostName, "worker", worker, "err", nerr, "detail", nerr.Detail())
-			return nil
+			slog.Error("Failed to fetch target info from nix",
+				"host", hostName, "worker", worker, "err", nerr)
+			return criticalErrorMsg{detail: nerr.Error()}
 		}
 		slog.Info("targetInfo", "info", targetInfo)
 
@@ -312,7 +338,7 @@ func (m *Model) handleHostStatusMsg(msg hostStatusMsg) tea.Cmd {
 	status := host.status.intro
 	status += runner.FormatOutput(
 		srunner.View(),
-		func(s string) string { return scriptLabelStyle.Render(s) })
+		func(s string) string { return labelStyle.Render(s) })
 	host.status.rendered = status
 
 	if m.selectedHost == host {
@@ -323,17 +349,20 @@ func (m *Model) handleHostStatusMsg(msg hostStatusMsg) tea.Cmd {
 	return cmd
 }
 
-var subtleColor = lipgloss.Color("241")
-var labelFgColor = lipgloss.Color("230")
-var labelBgColor = lipgloss.Color("62")
-var scriptLabelStyle = lipgloss.NewStyle().MarginTop(1).Padding(0, 1).
-	Foreground(labelFgColor).Background(labelBgColor)
+var (
+	subtleColor  = lipgloss.Color("241")
+	labelFgColor = lipgloss.Color("230")
+	labelBgColor = lipgloss.Color("62")
 
-var hostListStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Padding(0, 1)
-var contentHeaderStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Padding(0, 1)
-var contentPanelStyle = lipgloss.NewStyle().Border(
-	lipgloss.NormalBorder(), false, true, true, true).Padding(0, 1)
-var hintBarStyle = lipgloss.NewStyle().Padding(0, 1)
+	subtleStyle = lipgloss.NewStyle().Foreground(subtleColor)
+	labelStyle  = lipgloss.NewStyle().MarginTop(1).Padding(0, 1).
+			Foreground(labelFgColor).Background(labelBgColor)
+	hostListStyle      = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Padding(0, 1)
+	contentHeaderStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Padding(0, 1)
+	contentPanelStyle  = lipgloss.NewStyle().
+				Border(lipgloss.NormalBorder(), false, true, true, true).Padding(0, 1)
+	hintBarStyle = lipgloss.NewStyle().Padding(0, 1)
+)
 
 // View implements tea.Model.
 func (m Model) View() string {
@@ -342,30 +371,42 @@ func (m Model) View() string {
 		return "\n"
 	}
 
-	hosts := hostListStyle.Render(m.hostList.View())
+	switch m.viewMode {
+	case viewModeHosts:
+		hosts := hostListStyle.Render(m.hostList.View())
 
-	hostName := "None"
-	state := "Unknown"
-	scroll := "---%"
+		hostName := "None"
+		state := "Unknown"
+		scroll := "---%"
 
-	if m.selectedHost != nil {
-		hostName = m.selectedHost.name
-		if sr := m.selectedHost.status.runner; sr != nil {
-			state = sr.StateString()
+		if m.selectedHost != nil {
+			hostName = m.selectedHost.name
+			if sr := m.selectedHost.status.runner; sr != nil {
+				state = sr.StateString()
+			}
 		}
+
+		scroll = fmt.Sprintf("%3.0f%%", m.contentPanel.ScrollPercent()*100)
+
+		contentHeader := contentHeaderStyle.Render(
+			lipgloss.PlaceHorizontal(m.sizes.contentHeader.width, lipgloss.Center,
+				"Status | "+hostName+" | "+state+" | Scroll: "+scroll))
+		content := contentHeader + "\n" +
+			contentPanelStyle.Render(m.contentPanel.View())
+
+		hintBar := hintBarStyle.Render(m.help.View(m.keys))
+
+		return lipgloss.JoinHorizontal(lipgloss.Top, hosts, content) + "\n" + hintBar
+
+	case viewModeError:
+		return labelStyle.Render("Critical Error") +
+			"\n\n" +
+			m.error +
+			"\n\n" +
+			subtleStyle.Render("[Press Esc to continue]")
 	}
 
-	scroll = fmt.Sprintf("%3.0f%%", m.contentPanel.ScrollPercent()*100)
-
-	contentHeader := contentHeaderStyle.Render(
-		lipgloss.PlaceHorizontal(m.sizes.contentHeader.width, lipgloss.Center,
-			"Status | "+hostName+" | "+state+" | Scroll: "+scroll))
-	content := contentHeader + "\n" +
-		contentPanelStyle.Render(m.contentPanel.View())
-
-	hintBar := hintBarStyle.Render(m.help.View(m.keys))
-
-	return lipgloss.JoinHorizontal(lipgloss.Top, hosts, content) + "\n" + hintBar
+	return fmt.Sprintf("Unknown view mode: %v", m.viewMode)
 }
 
 // Calcuate size of panels based on window dimensions.
