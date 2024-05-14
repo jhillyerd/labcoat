@@ -259,8 +259,6 @@ func (m *Model) handleHostChangedMsg(msg hostChangedMsg) tea.Cmd {
 }
 
 func (m *Model) handleHostHoverMsg(msg hostHoverMsg) tea.Cmd {
-	const getNixWorkerTimeout = 30 * time.Second
-
 	hostName := msg.hostName
 
 	host := m.hosts[hostName]
@@ -273,7 +271,18 @@ func (m *Model) handleHostHoverMsg(msg hostHoverMsg) tea.Cmd {
 	host.status.rendered = intro
 	m.contentPanel.SetContent(intro)
 
+	if host.target == nil {
+		// Must collect target info before querying host status.
+		return m.hostTargetInfoCmd(hostName)
+	}
+
+	return m.hostStatusCmd(host)
+}
+
+func (m *Model) hostTargetInfoCmd(hostName string) tea.Cmd {
 	return func() tea.Msg {
+		const getNixWorkerTimeout = 30 * time.Second
+
 		ctx, done := context.WithTimeout(context.Background(), getNixWorkerTimeout)
 		defer done()
 
@@ -301,21 +310,29 @@ func (m *Model) handleHostHoverMsg(msg hostHoverMsg) tea.Cmd {
 }
 
 func (m *Model) handleHostTargetInfoMsg(msg hostTargetInfoMsg) tea.Cmd {
-	hostName := msg.hostName
-	target := &msg.target
-	m.hosts[hostName].target = target
+	// Store target info in hostModel.
+	host := m.hosts[msg.hostName]
+	host.target = &msg.target
 
-	// Fetch host status now that we know target deployHost.
+	// Fetch host status now that we know target info.
+	return m.hostStatusCmd(host)
+}
+
+func (m *Model) hostStatusCmd(host *hostModel) tea.Cmd {
+	if host.target == nil {
+		slog.Error("hostStatusCmd called with nil target", "host", host.name)
+		return nil
+	}
+
 	onUpdate := func(r *runner.Model) tea.Msg {
 		// Sent when the runner has new output to display.
-		return hostStatusMsg{hostName: hostName}
+		return hostStatusMsg{hostName: host.name}
 	}
 
 	script := runner.NewScript([]string{"systemctl --failed", "uname -a", "df -h"})
 	srunner := runner.NewRemoteScript(
-		onUpdate, target.DeployHost, "root", "host status (script)", script)
+		onUpdate, host.target.DeployHost, "root", "host status (script)", script)
 
-	host := m.hosts[hostName]
 	host.status.runner = srunner
 
 	// Init status display.
