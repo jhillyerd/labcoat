@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -16,6 +17,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jhillyerd/labui/internal/config"
 	"github.com/jhillyerd/labui/internal/nix"
 	"github.com/jhillyerd/labui/internal/npool"
 	"github.com/jhillyerd/labui/internal/runner"
@@ -26,31 +28,9 @@ const (
 	viewModeError
 )
 
-type KeyMap struct {
-	Up         key.Binding
-	Down       key.Binding
-	Left       key.Binding
-	Right      key.Binding
-	ScrollUp   key.Binding
-	ScrollDown key.Binding
-	Filter     key.Binding
-	Status     key.Binding
-	SSHInto    key.Binding
-	Quit       key.Binding
-}
-
-// FullHelp implements help.KeyMap.
-func (k KeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Up, k.Down, k.Filter, k.Status, k.Quit}}
-}
-
-// ShortHelp implements help.KeyMap.
-func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Filter, k.Status, k.SSHInto, k.Quit}
-}
-
 type Model struct {
 	program      *tea.Program
+	config       config.Config
 	ready        bool // true once screen size is known.
 	viewMode     int  // Current UI mode.
 	flakePath    string
@@ -61,7 +41,7 @@ type Model struct {
 	nixPool      *npool.Pool
 	contentPanel viewport.Model
 	sizes        layoutSizes
-	keys         KeyMap
+	keys         config.KeyMap
 	help         help.Model
 	spinner      spinner.Model
 	error        string
@@ -91,7 +71,7 @@ type dim struct {
 	height int
 }
 
-func New(keys KeyMap, flakePath string, hostNames []string) Model {
+func New(conf config.Config, keys config.KeyMap, flakePath string, hostNames []string) Model {
 	hostList := newHostList(hostNames)
 	hostList.list.KeyMap.CursorUp = keys.Up
 	hostList.list.KeyMap.CursorDown = keys.Down
@@ -109,6 +89,7 @@ func New(keys KeyMap, flakePath string, hostNames []string) Model {
 	}
 
 	return Model{
+		config:    conf,
 		viewMode:  viewModeHosts,
 		flakePath: flakePath,
 		hostList:  hostList,
@@ -332,9 +313,15 @@ func (m *Model) handleHostTargetInfoMsg(msg hostTargetInfoMsg) tea.Cmd {
 	host := m.hosts[msg.hostName]
 	host.target = &msg.target
 
-	// TODO make configurable
+	// Apply defaults.
+	if m.config.Hosts.DefaultSSHDomain != "" &&
+		strings.IndexRune(host.target.DeployHost, '.') == -1 {
+		// Append default domain.
+		host.target.DeployHost += "." + m.config.Hosts.DefaultSSHDomain
+
+	}
 	if host.target.DeployUser == "" {
-		host.target.DeployUser = "root"
+		host.target.DeployUser = m.config.Hosts.DefaultSSHUser
 	}
 
 	// Fetch host status now that we know target info.
@@ -352,9 +339,9 @@ func (m *Model) hostStatusCmd(host *hostModel) tea.Cmd {
 		return hostStatusMsg{hostName: host.name}
 	}
 
-	script := runner.NewScript([]string{"systemctl --failed", "uname -a", "df -h"})
+	script := runner.NewScript(m.config.Commands.StatusCmds)
 	srunner := runner.NewRemoteScript(
-		onUpdate, host.target.DeployHost, "root", "host status (script)", script)
+		onUpdate, host.target.DeployHost, host.target.DeployUser, "host status (script)", script)
 
 	host.status.runner = srunner
 
@@ -422,7 +409,7 @@ func (m *Model) startHostInteractiveSSH() tea.Cmd {
 	slog.Info("starting interactive SSH", "host", host.name)
 
 	// TODO look into tea.ExecCommand interface to display destination host to user, handle errors.
-	dest := host.target.SSHDestination("")
+	dest := host.target.SSHDestination()
 	cmd := exec.Command("ssh", dest)
 	prog := m.program
 

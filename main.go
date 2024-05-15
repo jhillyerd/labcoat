@@ -1,60 +1,50 @@
 package main
 
 import (
+	"errors"
+	"flag"
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
-	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/jhillyerd/labui/internal/config"
 	"github.com/jhillyerd/labui/internal/nix"
 	"github.com/jhillyerd/labui/internal/ui"
 )
 
-var DefaultKeyMap = ui.KeyMap{
-	Up: key.NewBinding(
-		key.WithKeys("k", "up"),
-		key.WithHelp("↑/k", "up"),
-	),
-	Down: key.NewBinding(
-		key.WithKeys("j", "down"),
-		key.WithHelp("↓/j", "down"),
-	),
-	Left: key.NewBinding(
-		key.WithKeys("h", "left"),
-		key.WithHelp("←/h", "left"),
-	),
-	Right: key.NewBinding(
-		key.WithKeys("l", "right"),
-		key.WithHelp("→/l", "right"),
-	),
-	ScrollUp: key.NewBinding(
-		key.WithKeys("pgup"),
-		key.WithHelp("PgUp", "scroll up"),
-	),
-	ScrollDown: key.NewBinding(
-		key.WithKeys("pgdown"),
-		key.WithHelp("PgDn", "scroll down"),
-	),
-	Filter: key.NewBinding(
-		key.WithKeys("/"),
-		key.WithHelp("/", "filter hosts"),
-	),
-	Status: key.NewBinding(
-		key.WithKeys("s"),
-		key.WithHelp("s", "get status"),
-	),
-	SSHInto: key.NewBinding(
-		key.WithKeys("i"),
-		key.WithHelp("i", "ssh into"),
-	),
-	Quit: key.NewBinding(
-		key.WithKeys("q"),
-		key.WithHelp("q", "quit"),
-	),
-}
-
 func main() {
+	var (
+		defaults = flag.Bool("defaults", false, "Prints default configuration to stdout and exits")
+	)
+	flag.Parse()
+
+	if *defaults {
+		config.PrintDefaults()
+		os.Exit(0)
+	}
+
+	// Load config file if present.
+	configRoot := os.Getenv("XDG_CONFIG_HOME")
+	if configRoot == "" {
+		home := os.Getenv("HOME")
+		if home == "" {
+			fmt.Fprintln(os.Stderr, "Neither $XDG_CONFIG_HOME or $HOME available")
+			os.Exit(1)
+		}
+		configRoot = filepath.Join(home, ".config")
+	}
+
+	configPath := filepath.Join(configRoot, "labui", "config.toml")
+	conf, err := config.Load(configPath)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "Failed to read config %q: %v\n", configPath, err)
+			os.Exit(1)
+		}
+	}
+
 	// Init logging.
 	lf, err := tea.LogToFile("debug.log", "")
 	if err != nil {
@@ -74,7 +64,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	p := tea.NewProgram(ui.New(DefaultKeyMap, flakePath, hosts), tea.WithAltScreen())
+	p := tea.NewProgram(ui.New(*conf, config.DefaultKeyMap, flakePath, hosts), tea.WithAltScreen())
 	go p.Send(p)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())

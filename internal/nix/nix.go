@@ -60,11 +60,8 @@ type TargetInfo struct {
 	DeployUser string `json:"deployUser"`
 }
 
-func (ti *TargetInfo) SSHDestination(defaultUser string) string {
+func (ti *TargetInfo) SSHDestination() string {
 	user := ti.DeployUser
-	if user == "" {
-		user = defaultUser
-	}
 
 	dest := "ssh://"
 	if user != "" {
