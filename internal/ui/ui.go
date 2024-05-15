@@ -65,6 +65,8 @@ type Model struct {
 	help         help.Model
 	spinner      spinner.Model
 	error        string
+	flashText    string
+	flashTimer   *time.Timer
 }
 
 type hostModel struct {
@@ -139,6 +141,10 @@ type criticalErrorMsg struct {
 	detail string
 }
 
+type errorFlashMsg struct {
+	text string
+}
+
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.hostList.Init(),
@@ -207,6 +213,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case criticalErrorMsg:
 		m.viewMode = viewModeError
 		m.error = msg.detail
+
+	case errorFlashMsg:
+		return m, m.handleErrorFlashMsg(msg)
 
 	case *tea.Program:
 		m.program = msg
@@ -380,13 +389,32 @@ func (m *Model) handleHostStatusMsg(msg hostStatusMsg) tea.Cmd {
 	return cmd
 }
 
+func (m *Model) handleErrorFlashMsg(msg errorFlashMsg) tea.Cmd {
+	if m.flashTimer != nil {
+		m.flashTimer.Stop()
+	}
+
+	if msg.text == "" {
+		m.flashText = ""
+		m.flashTimer = nil
+		return nil
+	}
+
+	m.flashText = msg.text
+	m.flashTimer = time.NewTimer(5 * time.Second)
+	return func() tea.Msg {
+		<-m.flashTimer.C
+		return errorFlashMsg{text: ""}
+	}
+}
+
 func (m *Model) startHostInteractiveSSH() tea.Cmd {
 	host := m.selectedHost
 
 	if host.target == nil {
 		return func() tea.Msg {
-			return criticalErrorMsg{
-				detail: fmt.Sprintf("Target info for host %q not yet available", host.name),
+			return errorFlashMsg{
+				text: fmt.Sprintf("Target info for host %q not yet available", host.name),
 			}
 		}
 	}
@@ -414,6 +442,7 @@ func (m *Model) startHostInteractiveSSH() tea.Cmd {
 }
 
 var (
+	errorColor   = lipgloss.Color("172")
 	subtleColor  = lipgloss.Color("241")
 	labelFgColor = lipgloss.Color("230")
 	labelBgColor = lipgloss.Color("62")
@@ -425,7 +454,8 @@ var (
 	contentHeaderStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Padding(0, 1)
 	contentPanelStyle  = lipgloss.NewStyle().
 				Border(lipgloss.NormalBorder(), false, true, true, true).Padding(0, 1)
-	hintBarStyle = lipgloss.NewStyle().Padding(0, 1)
+	hintBarStyle    = lipgloss.NewStyle().Padding(0, 1)
+	errorFlashStyle = hintBarStyle.Copy().Foreground(errorColor)
 )
 
 // View implements tea.Model.
@@ -458,7 +488,13 @@ func (m Model) View() string {
 		content := contentHeader + "\n" +
 			contentPanelStyle.Render(m.contentPanel.View())
 
-		hintBar := hintBarStyle.Render(m.help.View(m.keys))
+		// Display help or error flash if present.
+		hintBar := ""
+		if m.flashText == "" {
+			hintBar = hintBarStyle.Render(m.help.View(m.keys))
+		} else {
+			hintBar = errorFlashStyle.Render(m.flashText)
+		}
 
 		return lipgloss.JoinHorizontal(lipgloss.Top, hosts, content) + "\n" + hintBar
 
