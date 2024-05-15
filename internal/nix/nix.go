@@ -57,6 +57,22 @@ type TargetInfoRequest struct {
 // TargetInfo contains host information queried from nix.  It is cached.
 type TargetInfo struct {
 	DeployHost string `json:"deployHost"`
+	DeployUser string `json:"deployUser"`
+}
+
+func (ti *TargetInfo) SSHDestination(defaultUser string) string {
+	user := ti.DeployUser
+	if user == "" {
+		user = defaultUser
+	}
+
+	dest := "ssh://"
+	if user != "" {
+		dest += user + "@"
+	}
+	dest += ti.DeployHost
+
+	return dest
 }
 
 func GetTargetInfo(data TargetInfoRequest) (*TargetInfo, error) {

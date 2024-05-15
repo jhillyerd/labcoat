@@ -44,6 +44,10 @@ var DefaultKeyMap = ui.KeyMap{
 		key.WithKeys("s"),
 		key.WithHelp("s", "get status"),
 	),
+	SSHInto: key.NewBinding(
+		key.WithKeys("i"),
+		key.WithHelp("i", "ssh into"),
+	),
 	Quit: key.NewBinding(
 		key.WithKeys("q"),
 		key.WithHelp("q", "quit"),
@@ -71,6 +75,7 @@ func main() {
 	}
 
 	p := tea.NewProgram(ui.New(DefaultKeyMap, flakePath, hosts), tea.WithAltScreen())
+	go p.Send(p)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)

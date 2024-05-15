@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"os"
+	"os/exec"
 	"time"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -33,6 +35,7 @@ type KeyMap struct {
 	ScrollDown key.Binding
 	Filter     key.Binding
 	Status     key.Binding
+	SSHInto    key.Binding
 	Quit       key.Binding
 }
 
@@ -43,10 +46,11 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 
 // ShortHelp implements help.KeyMap.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Filter, k.Status, k.Quit}
+	return []key.Binding{k.Up, k.Down, k.Filter, k.Status, k.SSHInto, k.Quit}
 }
 
 type Model struct {
+	program      *tea.Program
 	ready        bool // true once screen size is known.
 	viewMode     int  // Current UI mode.
 	flakePath    string
@@ -168,6 +172,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
+		case "i":
+			return m, m.startHostInteractiveSSH()
 		case "ctrl+c", "q":
 			return m, tea.Quit
 		}
@@ -201,6 +207,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case criticalErrorMsg:
 		m.viewMode = viewModeError
 		m.error = msg.detail
+
+	case *tea.Program:
+		m.program = msg
 
 	case tea.Cmd:
 		slog.Error("Got tea.Cmd instead of tea.Msg")
@@ -303,7 +312,7 @@ func (m *Model) hostTargetInfoCmd(hostName string) tea.Cmd {
 				"host", hostName, "worker", worker, "err", nerr)
 			return criticalErrorMsg{detail: nerr.Error()}
 		}
-		slog.Info("targetInfo", "info", targetInfo)
+		slog.Debug("Got target info", "host", hostName, "worker", worker, "info", targetInfo)
 
 		return hostTargetInfoMsg{hostName: hostName, target: *targetInfo}
 	}
@@ -313,6 +322,11 @@ func (m *Model) handleHostTargetInfoMsg(msg hostTargetInfoMsg) tea.Cmd {
 	// Store target info in hostModel.
 	host := m.hosts[msg.hostName]
 	host.target = &msg.target
+
+	// TODO make configurable
+	if host.target.DeployUser == "" {
+		host.target.DeployUser = "root"
+	}
 
 	// Fetch host status now that we know target info.
 	return m.hostStatusCmd(host)
@@ -364,6 +378,39 @@ func (m *Model) handleHostStatusMsg(msg hostStatusMsg) tea.Cmd {
 	}
 
 	return cmd
+}
+
+func (m *Model) startHostInteractiveSSH() tea.Cmd {
+	host := m.selectedHost
+
+	if host.target == nil {
+		return func() tea.Msg {
+			return criticalErrorMsg{
+				detail: fmt.Sprintf("Target info for host %q not yet available", host.name),
+			}
+		}
+	}
+
+	slog.Info("starting interactive SSH", "host", host.name)
+
+	// TODO look into tea.ExecCommand interface to display destination host to user, handle errors.
+	dest := host.target.SSHDestination("")
+	cmd := exec.Command("ssh", dest)
+	prog := m.program
+
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		if err != nil {
+			prog.ReleaseTerminal()
+			defer prog.RestoreTerminal()
+
+			slog.Error("Interactive SSH failed", "cmd", cmd, "error", err)
+
+			fmt.Fprintf(os.Stderr, "\n%v\n\n[Press enter to continue]", err)
+			fmt.Scanln()
+		}
+
+		return nil
+	})
 }
 
 var (
