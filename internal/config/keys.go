@@ -65,7 +65,7 @@ var DefaultKeyMap = KeyMap{
 		key.WithHelp("i", "ssh into"),
 	),
 	Quit: key.NewBinding(
-		key.WithKeys("q"),
+		key.WithKeys("q", "ctrl+c"),
 		key.WithHelp("q", "quit"),
 	),
 }

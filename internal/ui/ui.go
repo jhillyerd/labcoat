@@ -158,10 +158,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 
-		switch msg.String() {
-		case "i":
+		switch {
+		case key.Matches(msg, m.keys.SSHInto):
 			return m, m.startHostInteractiveSSH()
-		case "ctrl+c", "q":
+		case key.Matches(msg, m.keys.Quit):
 			return m, tea.Quit
 		}
 
