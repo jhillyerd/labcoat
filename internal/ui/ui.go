@@ -235,18 +235,12 @@ func (m *Model) handleHostChangedMsg(msg hostChangedMsg) tea.Cmd {
 	slog.Debug("hostChanged", "host", msg.hostName)
 
 	m.selectedHost = m.hosts[msg.hostName]
-	m.contentPanel.SetContent(m.hosts[msg.hostName].status.rendered)
+	m.contentPanel.SetContent(m.selectedHost.status.rendered)
 
 	if m.hoverTimer != nil {
 		// Discard timer for previous host.
 		m.hoverTimer.Stop()
 		m.hoverTimer = nil
-	}
-
-	// Do nothing if status is already running.
-	statusRunner := m.selectedHost.status.runner
-	if statusRunner != nil && statusRunner.Running() {
-		return nil
 	}
 
 	// Trigger fetch status after timeout.
@@ -259,16 +253,7 @@ func (m *Model) handleHostChangedMsg(msg hostChangedMsg) tea.Cmd {
 
 func (m *Model) handleHostHoverMsg(msg hostHoverMsg) tea.Cmd {
 	hostName := msg.hostName
-
 	host := m.hosts[hostName]
-
-	// Init status display.
-	intro := lipgloss.NewStyle().
-		Foreground(subtleColor).
-		Render("Querying nix for information on "+hostName) + "\n"
-	host.status.intro = intro
-	host.status.rendered = intro
-	m.contentPanel.SetContent(intro)
 
 	if host.target == nil {
 		// Must collect target info before querying host status.
@@ -279,6 +264,16 @@ func (m *Model) handleHostHoverMsg(msg hostHoverMsg) tea.Cmd {
 }
 
 func (m *Model) hostTargetInfoCmd(hostName string) tea.Cmd {
+	host := m.hosts[hostName]
+
+	// Init status display.
+	intro := lipgloss.NewStyle().
+		Foreground(subtleColor).
+		Render("Querying nix for information on "+hostName) + "\n"
+	host.status.intro = intro
+	host.status.rendered = intro
+	m.contentPanel.SetContent(intro)
+
 	return func() tea.Msg {
 		const getNixWorkerTimeout = 30 * time.Second
 
@@ -334,13 +329,19 @@ func (m *Model) hostStatusCmd(host *hostModel) tea.Cmd {
 		return nil
 	}
 
+	// Do nothing if status job is already running.
+	srunner := m.selectedHost.status.runner
+	if srunner != nil && srunner.Running() {
+		return nil
+	}
+
 	onUpdate := func(r *runner.Model) tea.Msg {
 		// Sent when the runner has new output to display.
 		return hostStatusMsg{hostName: host.name}
 	}
 
 	script := runner.NewScript(m.config.Commands.StatusCmds)
-	srunner := runner.NewRemoteScript(
+	srunner = runner.NewRemoteScript(
 		onUpdate, host.target.DeployHost, host.target.DeployUser, "host status (script)", script)
 
 	host.status.runner = srunner
