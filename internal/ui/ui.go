@@ -106,10 +106,6 @@ type hostTargetInfoMsg struct {
 	target   nix.TargetInfo
 }
 
-type hostStatusMsg struct {
-	hostName string
-}
-
 type hostChangedMsg struct {
 	hostName string
 }
@@ -257,19 +253,17 @@ func (m *Model) handleHostHoverMsg(msg hostHoverMsg) tea.Cmd {
 
 	if host.target == nil {
 		// Must collect target info before querying host status.
-		return m.hostTargetInfoCmd(hostName)
+		return m.hostTargetInfoCmd(host)
 	}
 
 	return m.hostStatusCmd(host)
 }
 
-func (m *Model) hostTargetInfoCmd(hostName string) tea.Cmd {
-	host := m.hosts[hostName]
-
+func (m *Model) hostTargetInfoCmd(host *hostModel) tea.Cmd {
 	// Init status display.
 	intro := lipgloss.NewStyle().
 		Foreground(subtleColor).
-		Render("Querying nix for information on "+hostName) + "\n"
+		Render("Querying nix for information on "+host.name) + "\n"
 	host.status.intro = intro
 	host.status.rendered = intro
 	m.contentPanel.SetContent(intro)
@@ -287,19 +281,19 @@ func (m *Model) hostTargetInfoCmd(hostName string) tea.Cmd {
 		}
 		defer worker.Done()
 
-		slog.Info("Fetching target info from nix", "host", hostName, "worker", worker)
+		slog.Info("Fetching target info from nix", "host", host.name, "worker", worker)
 		targetInfo, nerr := nix.GetTargetInfo(nix.TargetInfoRequest{
 			FlakePath: m.flakePath,
-			HostName:  hostName,
+			HostName:  host.name,
 		})
 		if nerr != nil {
 			slog.Error("Failed to fetch target info from nix",
-				"host", hostName, "worker", worker, "err", nerr)
+				"host", host.name, "worker", worker, "err", nerr)
 			return criticalErrorMsg{detail: nerr.Error()}
 		}
-		slog.Debug("Got target info", "host", hostName, "worker", worker, "info", targetInfo)
+		slog.Debug("Got target info", "host", host.name, "worker", worker, "info", targetInfo)
 
-		return hostTargetInfoMsg{hostName: hostName, target: *targetInfo}
+		return hostTargetInfoMsg{hostName: host.name, target: *targetInfo}
 	}
 }
 
@@ -321,60 +315,6 @@ func (m *Model) handleHostTargetInfoMsg(msg hostTargetInfoMsg) tea.Cmd {
 
 	// Fetch host status now that we know target info.
 	return m.hostStatusCmd(host)
-}
-
-func (m *Model) hostStatusCmd(host *hostModel) tea.Cmd {
-	if host.target == nil {
-		slog.Error("hostStatusCmd called with nil target", "host", host.name)
-		return nil
-	}
-
-	// Do nothing if status job is already running.
-	srunner := m.selectedHost.status.runner
-	if srunner != nil && srunner.Running() {
-		return nil
-	}
-
-	onUpdate := func(r *runner.Model) tea.Msg {
-		// Sent when the runner has new output to display.
-		return hostStatusMsg{hostName: host.name}
-	}
-
-	script := runner.NewScript(m.config.Commands.StatusCmds)
-	srunner = runner.NewRemoteScript(
-		onUpdate, host.target.DeployHost, host.target.DeployUser, "host status (script)", script)
-
-	host.status.runner = srunner
-
-	// Init status display.
-	intro := lipgloss.NewStyle().
-		Foreground(subtleColor).
-		Render(srunner.String()+" @ "+srunner.Destination()) + "\n"
-	host.status.intro = intro
-	host.status.rendered = intro
-	m.contentPanel.SetContent(intro)
-
-	return srunner.Init()
-}
-
-func (m *Model) handleHostStatusMsg(msg hostStatusMsg) tea.Cmd {
-	host := m.hosts[msg.hostName]
-	srunner := host.status.runner
-	_, cmd := srunner.Update(nil)
-
-	// Render and cache status content.
-	status := host.status.intro
-	status += runner.FormatOutput(
-		srunner.View(),
-		func(s string) string { return labelStyle.Render(s) })
-	host.status.rendered = status
-
-	if m.selectedHost == host {
-		// User is currently viewing the host receiving this status, update the panel content.
-		m.contentPanel.SetContent(status)
-	}
-
-	return cmd
 }
 
 func (m *Model) handleErrorFlashMsg(msg errorFlashMsg) tea.Cmd {
