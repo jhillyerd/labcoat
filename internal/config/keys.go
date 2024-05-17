@@ -11,6 +11,7 @@ type KeyMap struct {
 	Right      key.Binding
 	ScrollUp   key.Binding
 	ScrollDown key.Binding
+	NextTab    key.Binding
 	Filter     key.Binding
 	Status     key.Binding
 	SSHInto    key.Binding
@@ -51,6 +52,10 @@ var DefaultKeyMap = KeyMap{
 	ScrollDown: key.NewBinding(
 		key.WithKeys("pgdown"),
 		key.WithHelp("PgDn", "scroll down"),
+	),
+	NextTab: key.NewBinding(
+		key.WithKeys("tab"),
+		key.WithHelp("Tab", "next tab"),
 	),
 	Filter: key.NewBinding(
 		key.WithKeys("/"),

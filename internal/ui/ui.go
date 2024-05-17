@@ -28,6 +28,13 @@ const (
 	viewModeError
 )
 
+const (
+	hostTabStatus = iota
+	hostTabRunCmd
+)
+
+var hostTabNames = []string{"Host Status", "Run Command"}
+
 type Model struct {
 	program      *tea.Program
 	config       config.Config
@@ -39,7 +46,7 @@ type Model struct {
 	selectedHost *hostModel
 	hoverTimer   *time.Timer // Triggers host status collection when user hovers.
 	nixPool      *npool.Pool
-	contentPanel viewport.Model
+	contentPanel *viewport.Model
 	sizes        layoutSizes
 	keys         config.KeyMap
 	help         help.Model
@@ -50,12 +57,18 @@ type Model struct {
 }
 
 type hostModel struct {
-	name   string
-	target *nix.TargetInfo // Cached info about target host.
-	status struct {
-		intro    string // Rendered intro text: command, host, etc.
-		rendered string // Rendered status content cache.
-		runner   *runner.Model
+	name    string
+	target  *nix.TargetInfo // Cached info about target host.
+	hostTab int             // Currently visible host tab.
+	status  struct {
+		intro        string // Rendered intro text: command, host, etc.
+		contentPanel viewport.Model
+		runner       *runner.Model
+	}
+	runCmd struct {
+		intro        string // Rendered intro text: command, host, etc.
+		contentPanel viewport.Model
+		runner       *runner.Model
 	}
 }
 
@@ -85,7 +98,10 @@ func New(conf config.Config, keys config.KeyMap, flakePath string, hostNames []s
 
 	hosts := make(map[string]*hostModel, len(hostNames))
 	for _, v := range hostNames {
-		hosts[v] = &hostModel{name: v}
+		hm := &hostModel{name: v}
+		hm.status.contentPanel = newContentPanel(keys)
+		hm.runCmd.contentPanel = newContentPanel(keys)
+		hosts[v] = hm
 	}
 
 	return Model{
@@ -99,6 +115,22 @@ func New(conf config.Config, keys config.KeyMap, flakePath string, hostNames []s
 		help:      help.New(),
 		spinner:   spin,
 	}
+}
+
+func newContentPanel(keys config.KeyMap) viewport.Model {
+	cp := viewport.New(80, 25)
+
+	// TODO consider handling keymaps/mouse in ui.Update().
+	cp.KeyMap.PageUp = keys.ScrollUp
+	cp.KeyMap.PageDown = keys.ScrollDown
+
+	blank := key.NewBinding(key.WithDisabled())
+	cp.KeyMap.Up = blank
+	cp.KeyMap.Down = blank
+	cp.KeyMap.HalfPageUp = blank
+	cp.KeyMap.HalfPageDown = blank
+
+	return cp
 }
 
 type hostTargetInfoMsg struct {
@@ -155,6 +187,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch {
+		case key.Matches(msg, m.keys.NextTab):
+			return m, m.handleNextTabKey()
 		case key.Matches(msg, m.keys.SSHInto):
 			return m, m.startHostInteractiveSSH()
 		case key.Matches(msg, m.keys.Quit):
@@ -176,15 +210,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.sizes = calculateSizes(msg)
 		m.hostList.SetSize(m.sizes.hostList.width, m.sizes.hostList.height)
+		m.updateContentPanel()
 
-		if m.ready {
-			m.contentPanel.Width = m.sizes.contentPanel.width
-			m.contentPanel.Height = m.sizes.contentPanel.height
-		} else {
-			// First size message, init content viewport.
-			m.initContentPanel()
-			m.ready = true
-		}
 		return m, nil
 
 	case criticalErrorMsg:
@@ -205,8 +232,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.hostList, cmd = m.hostList.Update(msg)
 	cmds = append(cmds, cmd)
 
-	m.contentPanel, cmd = m.contentPanel.Update(msg)
-	cmds = append(cmds, cmd)
+	if m.contentPanel != nil {
+		cp, cmd := m.contentPanel.Update(msg)
+		*m.contentPanel = cp
+		cmds = append(cmds, cmd)
+	}
 
 	m.spinner, cmd = m.spinner.Update(msg)
 	cmds = append(cmds, cmd)
@@ -214,24 +244,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m *Model) initContentPanel() {
-	cp := viewport.New(m.sizes.contentPanel.width, m.sizes.contentPanel.height)
-	cp.KeyMap.PageUp = m.keys.ScrollUp
-	cp.KeyMap.PageDown = m.keys.ScrollDown
+func (m *Model) handleNextTabKey() tea.Cmd {
+	if m.selectedHost != nil {
+		m.selectedHost.hostTab = (m.selectedHost.hostTab + 1) % len(hostTabNames)
+		m.updateContentPanel()
+	}
 
-	cp.KeyMap.Up = key.NewBinding(key.WithDisabled())
-	cp.KeyMap.Down = key.NewBinding(key.WithDisabled())
-	cp.KeyMap.HalfPageUp = key.NewBinding(key.WithDisabled())
-	cp.KeyMap.HalfPageDown = key.NewBinding(key.WithDisabled())
+	return nil
+}
 
-	m.contentPanel = cp
+// Updates the main contentPanel viewport for current host & tab.
+// Multiple viewports are used to maintain scroll position when switching.
+func (m *Model) updateContentPanel() {
+	if m.selectedHost != nil {
+		switch m.selectedHost.hostTab {
+		case hostTabStatus:
+			m.contentPanel = &m.selectedHost.status.contentPanel
+		case hostTabRunCmd:
+			m.contentPanel = &m.selectedHost.runCmd.contentPanel
+		default:
+			slog.Error("Unknown host tab index (bug)", "index", m.selectedHost.hostTab)
+			return
+		}
+
+		m.contentPanel.Width = m.sizes.contentPanel.width
+		m.contentPanel.Height = m.sizes.contentPanel.height
+		m.ready = true
+	}
 }
 
 func (m *Model) handleHostChangedMsg(msg hostChangedMsg) tea.Cmd {
 	slog.Debug("hostChanged", "host", msg.hostName)
 
 	m.selectedHost = m.hosts[msg.hostName]
-	m.contentPanel.SetContent(m.selectedHost.status.rendered)
+	m.updateContentPanel()
 
 	if m.hoverTimer != nil {
 		// Discard timer for previous host.
@@ -264,9 +310,8 @@ func (m *Model) hostTargetInfoCmd(host *hostModel) tea.Cmd {
 	intro := lipgloss.NewStyle().
 		Foreground(subtleColor).
 		Render("Querying nix for information on "+host.name) + "\n"
-	host.status.intro = intro
-	host.status.rendered = intro
-	m.contentPanel.SetContent(intro)
+	host.status.contentPanel.SetContent(intro)
+	m.updateContentPanel()
 
 	return func() tea.Msg {
 		const getNixWorkerTimeout = 30 * time.Second
@@ -397,11 +442,13 @@ func (m Model) View() string {
 	case viewModeHosts:
 		hosts := hostListStyle.Render(m.hostList.View())
 
+		tabName := "Unknown"
 		hostName := "None"
 		state := "Unknown"
 		scroll := "---%"
 
 		if m.selectedHost != nil {
+			tabName = hostTabNames[m.selectedHost.hostTab]
 			hostName = m.selectedHost.name
 			if sr := m.selectedHost.status.runner; sr != nil {
 				state = sr.StateString()
@@ -412,7 +459,7 @@ func (m Model) View() string {
 
 		contentHeader := contentHeaderStyle.Render(
 			lipgloss.PlaceHorizontal(m.sizes.contentHeader.width, lipgloss.Center,
-				"Status | "+hostName+" | "+state+" | Scroll: "+scroll))
+				tabName+" | "+hostName+" | "+state+" | Scroll: "+scroll))
 		content := contentHeader + "\n" +
 			contentPanelStyle.Render(m.contentPanel.View())
 

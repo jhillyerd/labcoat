@@ -2,6 +2,7 @@ package ui
 
 import (
 	"log/slog"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -40,8 +41,7 @@ func (m *Model) hostStatusCmd(host *hostModel) tea.Cmd {
 		Foreground(subtleColor).
 		Render(srunner.String()+" @ "+srunner.Destination()) + "\n"
 	host.status.intro = intro
-	host.status.rendered = intro
-	m.contentPanel.SetContent(intro)
+	host.status.contentPanel.SetContent(intro)
 
 	return srunner.Init()
 }
@@ -56,12 +56,16 @@ func (m *Model) handleHostStatusMsg(msg hostStatusMsg) tea.Cmd {
 	status += runner.FormatOutput(
 		srunner.View(),
 		func(s string) string { return labelStyle.Render(s) })
-	host.status.rendered = status
 
-	if m.selectedHost == host {
-		// User is currently viewing the host receiving this status, update the panel content.
-		m.contentPanel.SetContent(status)
-	}
+	// Carriage returns cause formatting issues.
+	status = strings.ReplaceAll(status, "\r", "")
+
+	// Truncate content width to preserve correct viewport line counts & scrolling.
+	// Viewport bug: https://github.com/charmbracelet/bubbles/issues/479
+	// TODO configurable line wrapping?
+	status = lipgloss.NewStyle().MaxWidth(m.sizes.contentPanel.width).Render(status)
+
+	host.status.contentPanel.SetContent(status)
 
 	return cmd
 }
