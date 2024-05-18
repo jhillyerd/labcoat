@@ -51,6 +51,7 @@ type Model struct {
 	keys         config.KeyMap
 	help         help.Model
 	spinner      spinner.Model
+	confirmation *confirmationMsg
 	error        string
 	flashText    string
 	flashTimer   *time.Timer
@@ -147,6 +148,12 @@ type hostHoverMsg struct {
 	hostName string
 }
 
+type confirmationMsg struct {
+	text   string
+	yesCmd tea.Cmd
+	noCmd  tea.Cmd
+}
+
 type criticalErrorMsg struct {
 	detail string
 }
@@ -172,6 +179,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		// slog.Debug("tea.KeyMsg", "key", msg)
 
+		if msg.String() == "ctrl+c" {
+			// Ctrl-C overrides all view states to exit.
+			return m, tea.Quit
+		}
+
 		if m.viewMode == viewModeError {
 			// Error display is modal, swallow all key press messages.
 			if msg.String() == "esc" {
@@ -187,9 +199,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 
+		if m.confirmation != nil {
+			// Awaiting confirmation
+			if msg.String() == "y" {
+				cmd = m.confirmation.yesCmd
+				m.confirmation = nil
+				return m, cmd
+			}
+
+			if msg.String() == "n" {
+				cmd = m.confirmation.noCmd
+				m.confirmation = nil
+				return m, cmd
+			}
+
+			slog.Debug("Invalid confirmation keypress", "key", msg)
+			return m, nil
+		}
+
 		switch {
 		case key.Matches(msg, m.keys.NextTab):
 			return m, m.handleNextTabKey()
+
+		case key.Matches(msg, m.keys.Reboot):
+			return m, func() tea.Msg {
+				return confirmationMsg{
+					text: "reboot? y/n",
+				}
+			}
 
 		case key.Matches(msg, m.keys.Status):
 			return m, m.hostStatusCmd(m.selectedHost)
@@ -218,6 +255,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.hostList.SetSize(m.sizes.hostList.width, m.sizes.hostList.height)
 		m.updateContentPanel()
 
+		return m, nil
+
+	case confirmationMsg:
+		slog.Debug("Start confirmation", "text", msg.text)
+		m.confirmation = &msg
 		return m, nil
 
 	case criticalErrorMsg:
@@ -434,6 +476,7 @@ func (m *Model) startHostInteractiveSSH() tea.Cmd {
 var (
 	errorColor   = lipgloss.Color("172")
 	subtleColor  = lipgloss.Color("241")
+	confirmColor = lipgloss.Color("220")
 	labelFgColor = lipgloss.Color("230")
 	labelBgColor = lipgloss.Color("62")
 
@@ -444,8 +487,9 @@ var (
 	contentHeaderStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Padding(0, 1)
 	contentPanelStyle  = lipgloss.NewStyle().
 				Border(lipgloss.NormalBorder(), false, true, true, true).Padding(0, 1)
-	hintBarStyle    = lipgloss.NewStyle().Padding(0, 1)
-	errorFlashStyle = hintBarStyle.Copy().Foreground(errorColor)
+	hintBarStyle       = lipgloss.NewStyle().Padding(0, 1)
+	errorFlashStyle    = hintBarStyle.Copy().Foreground(errorColor)
+	confirmDialogStyle = hintBarStyle.Copy().Foreground(confirmColor)
 )
 
 // View implements tea.Model.
@@ -482,10 +526,12 @@ func (m Model) View() string {
 
 		// Display help or error flash if present.
 		hintBar := ""
-		if m.flashText == "" {
-			hintBar = hintBarStyle.Render(m.help.View(m.keys))
-		} else {
+		if m.flashText != "" {
 			hintBar = errorFlashStyle.Render(m.flashText)
+		} else if m.confirmation != nil {
+			hintBar = confirmDialogStyle.Render(m.confirmation.text)
+		} else {
+			hintBar = hintBarStyle.Render(m.help.View(m.keys))
 		}
 
 		return lipgloss.JoinHorizontal(lipgloss.Top, hosts, content) + "\n" + hintBar

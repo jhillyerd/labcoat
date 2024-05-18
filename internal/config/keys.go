@@ -13,9 +13,11 @@ type KeyMap struct {
 	ScrollDown key.Binding
 	NextTab    key.Binding
 	Filter     key.Binding
-	Status     key.Binding
-	SSHInto    key.Binding
-	Quit       key.Binding
+
+	Reboot  key.Binding
+	SSHInto key.Binding
+	Status  key.Binding
+	Quit    key.Binding
 }
 
 // FullHelp implements help.KeyMap.
@@ -61,16 +63,21 @@ var DefaultKeyMap = KeyMap{
 		key.WithKeys("/"),
 		key.WithHelp("/", "filter hosts"),
 	),
-	Status: key.NewBinding(
-		key.WithKeys("s"),
-		key.WithHelp("s", "get status"),
+
+	Reboot: key.NewBinding(
+		key.WithKeys("r"),
+		key.WithHelp("r", "reboot"),
 	),
 	SSHInto: key.NewBinding(
 		key.WithKeys("i"),
 		key.WithHelp("i", "ssh into"),
 	),
+	Status: key.NewBinding(
+		key.WithKeys("s"),
+		key.WithHelp("s", "get status"),
+	),
 	Quit: key.NewBinding(
-		key.WithKeys("q", "ctrl+c"),
+		key.WithKeys("q"),
 		key.WithHelp("q", "quit"),
 	),
 }
