@@ -61,6 +61,7 @@ type hostModel struct {
 	target  *nix.TargetInfo // Cached info about target host.
 	hostTab int             // Currently visible host tab.
 	status  struct {
+		collected    bool   // Whether status has been collected for this host.
 		intro        string // Rendered intro text: command, host, etc.
 		contentPanel viewport.Model
 		runner       *runner.Model
@@ -169,7 +170,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		slog.Debug("tea.KeyMsg", "key", msg)
+		// slog.Debug("tea.KeyMsg", "key", msg)
 
 		if m.viewMode == viewModeError {
 			// Error display is modal, swallow all key press messages.
@@ -189,8 +190,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case key.Matches(msg, m.keys.NextTab):
 			return m, m.handleNextTabKey()
+
+		case key.Matches(msg, m.keys.Status):
+			return m, m.hostStatusCmd(m.selectedHost)
+
 		case key.Matches(msg, m.keys.SSHInto):
 			return m, m.startHostInteractiveSSH()
+
 		case key.Matches(msg, m.keys.Quit):
 			return m, tea.Quit
 		}
@@ -246,11 +252,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) handleNextTabKey() tea.Cmd {
 	if m.selectedHost != nil {
-		m.selectedHost.hostTab = (m.selectedHost.hostTab + 1) % len(hostTabNames)
-		m.updateContentPanel()
+		m.setVisibleHostTab(m.selectedHost.hostTab + 1)
 	}
 
 	return nil
+}
+
+func (m *Model) setVisibleHostTab(hostTab int) {
+	if m.selectedHost != nil {
+		m.selectedHost.hostTab = hostTab % len(hostTabNames)
+		m.updateContentPanel()
+	}
 }
 
 // Updates the main contentPanel viewport for current host & tab.
@@ -274,7 +286,7 @@ func (m *Model) updateContentPanel() {
 }
 
 func (m *Model) handleHostChangedMsg(msg hostChangedMsg) tea.Cmd {
-	slog.Debug("hostChanged", "host", msg.hostName)
+	// slog.Debug("hostChanged", "host", msg.hostName)
 
 	m.selectedHost = m.hosts[msg.hostName]
 	m.updateContentPanel()
@@ -300,6 +312,11 @@ func (m *Model) handleHostHoverMsg(msg hostHoverMsg) tea.Cmd {
 	if host.target == nil {
 		// Must collect target info before querying host status.
 		return m.hostTargetInfoCmd(host)
+	}
+
+	if host.status.collected {
+		// Only collect status on hover once.
+		return nil
 	}
 
 	return m.hostStatusCmd(host)

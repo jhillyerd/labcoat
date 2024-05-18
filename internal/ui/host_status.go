@@ -11,23 +11,32 @@ import (
 
 type hostStatusMsg struct {
 	hostName string
+	final    bool // Indicates last status update message.
 }
 
 func (m *Model) hostStatusCmd(host *hostModel) tea.Cmd {
+	if host == nil {
+		slog.Error("hostStatusCmd called with nil host")
+		return nil
+	}
+
 	if host.target == nil {
 		slog.Error("hostStatusCmd called with nil target", "host", host.name)
 		return nil
 	}
 
+	m.setVisibleHostTab(hostTabStatus)
+
 	// Do nothing if status job is already running.
 	srunner := m.selectedHost.status.runner
 	if srunner != nil && srunner.Running() {
+		slog.Debug("hostStatusCmd already running", "host", host.name)
 		return nil
 	}
 
 	onUpdate := func(r *runner.Model) tea.Msg {
 		// Sent when the runner has new output to display.
-		return hostStatusMsg{hostName: host.name}
+		return hostStatusMsg{hostName: host.name, final: r.Complete()}
 	}
 
 	script := runner.NewScript(m.config.Commands.StatusCmds)
@@ -48,8 +57,18 @@ func (m *Model) hostStatusCmd(host *hostModel) tea.Cmd {
 
 func (m *Model) handleHostStatusMsg(msg hostStatusMsg) tea.Cmd {
 	host := m.hosts[msg.hostName]
+
+	if host.status.runner == nil {
+		slog.Error("Received hostStatusMsg for host with no runner (bug)", "host", msg.hostName)
+		return nil
+	}
+
 	srunner := host.status.runner
 	_, cmd := srunner.Update(nil)
+
+	if msg.final {
+		host.status.collected = srunner.Successful()
+	}
 
 	// Render and cache status content.
 	status := host.status.intro

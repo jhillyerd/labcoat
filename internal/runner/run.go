@@ -96,10 +96,25 @@ func NewRemoteScript(
 	return r
 }
 
+// Running is true if in not-started or running state.
 func (r *Model) Running() bool {
 	r.RLock()
 	defer r.RUnlock()
 	return r.state == stateNotStarted || r.state == stateRunning
+}
+
+// Complete is true if in done or failed state.
+func (r *Model) Complete() bool {
+	r.RLock()
+	defer r.RUnlock()
+	return r.state == stateDone || r.state == stateFailed
+}
+
+// Successful is true if done, not failed.
+func (r *Model) Successful() bool {
+	r.RLock()
+	defer r.RUnlock()
+	return r.state == stateDone
 }
 
 func (r *Model) waitForOutput() tea.Cmd {
