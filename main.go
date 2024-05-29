@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -39,10 +38,8 @@ func main() {
 	configPath := filepath.Join(configRoot, "labui", "config.toml")
 	conf, err := config.Load(configPath)
 	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintf(os.Stderr, "Failed to read config %q: %v\n", configPath, err)
-			os.Exit(1)
-		}
+		fmt.Fprintf(os.Stderr, "Failed to read config %q: %v\n", configPath, err)
+		os.Exit(1)
 	}
 
 	// Init logging.

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -56,12 +57,17 @@ func PrintDefaults() error {
 
 // Load and parse config, overlaying `Default` values.
 func Load(path string) (*Config, error) {
+	conf := Default()
+
 	b, err := os.ReadFile(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// Use defaults when no config file present.
+			return &conf, nil
+		}
 		return nil, err
 	}
 
-	conf := Default()
 	if err = toml.Unmarshal(b, &conf); err != nil {
 		return nil, err
 	}
