@@ -33,9 +33,8 @@ func (m *Model) hostRunCommandCmd(host *hostModel, prog string, args ...string) 
 
 func (m *Model) handleHostRunCommandMsg(msg hostRunCommandMsg) tea.Cmd {
 	host := msg.host
-	if host == nil {
-		slog.Error("hostRunCommand given nil host arg (bug)")
-		return nil
+	if ok, cmd := requireHostTarget("hostRunCommand", host); !ok {
+		return cmd
 	}
 
 	m.setVisibleHostTab(hostTabRunCmd)

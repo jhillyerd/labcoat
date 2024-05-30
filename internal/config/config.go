@@ -11,6 +11,7 @@ import (
 type Config struct {
 	Commands Commands `toml:"commands"`
 	Hosts    Hosts    `toml:"hosts" comment:"Host deployment configuration. Nix attrs typically start with 'flake' or 'target'."`
+	Nix      Nix      `toml:"nix"`
 }
 
 type Commands struct {
@@ -22,6 +23,10 @@ type Hosts struct {
 	DefaultSSHUser   string `toml:"default-ssh-user"`
 	DeployHostAttr   string `toml:"deploy-host-attr" comment:"Nix attr path for SSH deploy target hostname"`
 	DeployUserAttr   string `toml:"deploy-user-attr"`
+}
+
+type Nix struct {
+	DefaultBuildHost string `toml:"default-build-host" comment:"Default [user@]host to run Nix builds on"`
 }
 
 // Default returns the default Config.
@@ -38,6 +43,9 @@ func Default() Config {
 		Hosts: Hosts{
 			DefaultSSHUser: "root",
 			DeployHostAttr: "target.config.networking.fqdnOrHostName",
+		},
+		Nix: Nix{
+			DefaultBuildHost: "localhost",
 		},
 	}
 }

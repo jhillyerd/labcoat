@@ -5,6 +5,7 @@ import (
 )
 
 type KeyMap struct {
+	// Navigation.
 	Up         key.Binding
 	Down       key.Binding
 	Left       key.Binding
@@ -14,6 +15,8 @@ type KeyMap struct {
 	NextTab    key.Binding
 	Filter     key.Binding
 
+	// Commands.
+	Deploy  key.Binding
 	Reboot  key.Binding
 	SSHInto key.Binding
 	Status  key.Binding
@@ -27,7 +30,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 
 // ShortHelp implements help.KeyMap.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Filter, k.Status, k.SSHInto, k.Reboot, k.Quit}
+	return []key.Binding{k.Up, k.Down, k.Filter, k.Status, k.Deploy, k.SSHInto, k.Reboot, k.Quit}
 }
 
 var DefaultKeyMap = KeyMap{
@@ -64,6 +67,10 @@ var DefaultKeyMap = KeyMap{
 		key.WithHelp("/", "filter hosts"),
 	),
 
+	Deploy: key.NewBinding(
+		key.WithKeys("d"),
+		key.WithHelp("d", "deploy"),
+	),
 	Reboot: key.NewBinding(
 		key.WithKeys("r"),
 		key.WithHelp("r", "reboot"),

@@ -15,14 +15,8 @@ type hostStatusMsg struct {
 }
 
 func (m *Model) hostStatusCmd(host *hostModel) tea.Cmd {
-	if host == nil {
-		slog.Error("hostStatusCmd called with nil host")
-		return nil
-	}
-
-	if host.target == nil {
-		slog.Error("hostStatusCmd called with nil target", "host", host.name)
-		return nil
+	if ok, cmd := requireHostTarget("hostStatusCmd", host); !ok {
+		return cmd
 	}
 
 	m.setVisibleHostTab(hostTabStatus)

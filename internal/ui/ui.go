@@ -30,10 +30,11 @@ const (
 
 const (
 	hostTabStatus = iota
+	hostTabDeploy
 	hostTabRunCmd
 )
 
-var hostTabNames = []string{"Host Status", "Run Command"}
+var hostTabNames = []string{"Host Status", "Deploy", "Run Command"}
 
 type Model struct {
 	program      *tea.Program
@@ -61,13 +62,18 @@ type hostModel struct {
 	name    string
 	target  *nix.TargetInfo // Cached info about target host.
 	hostTab int             // Currently visible host tab.
-	status  struct {
-		collected    bool   // Whether status has been collected for this host.
+	deploy  struct {
 		intro        string // Rendered intro text: command, host, etc.
 		contentPanel viewport.Model
 		runner       *runner.Model
 	}
 	runCmd struct {
+		intro        string // Rendered intro text: command, host, etc.
+		contentPanel viewport.Model
+		runner       *runner.Model
+	}
+	status struct {
+		collected    bool   // Whether status has been collected for this host.
 		intro        string // Rendered intro text: command, host, etc.
 		contentPanel viewport.Model
 		runner       *runner.Model
@@ -200,7 +206,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.confirmation != nil {
-			// Awaiting confirmation
+			// Awaiting confirmation, `y` or `n` will trigger the corresponding cmd.
 			if msg.String() == "y" {
 				cmd = m.confirmation.yesCmd
 				m.confirmation = nil
@@ -220,6 +226,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case key.Matches(msg, m.keys.NextTab):
 			return m, m.handleNextTabKey()
+
+		case key.Matches(msg, m.keys.Deploy):
+			return m, m.hostDeployCmd(m.selectedHost)
 
 		case key.Matches(msg, m.keys.Reboot):
 			return m, func() tea.Msg {
@@ -250,6 +259,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case hostStatusMsg:
 		return m, m.handleHostStatusMsg(msg)
+
+	case hostDeployMsg:
+		return m, m.handleHostDeployMsg(msg)
+
+	case hostDeployOutputMsg:
+		return m, m.handleHostDeployOutputMsg(msg)
 
 	case hostRunCommandMsg:
 		return m, m.handleHostRunCommandMsg(msg)
@@ -320,6 +335,8 @@ func (m *Model) updateContentPanel() {
 		switch m.selectedHost.hostTab {
 		case hostTabStatus:
 			m.contentPanel = &m.selectedHost.status.contentPanel
+		case hostTabDeploy:
+			m.contentPanel = &m.selectedHost.deploy.contentPanel
 		case hostTabRunCmd:
 			m.contentPanel = &m.selectedHost.runCmd.contentPanel
 		default:
@@ -376,6 +393,7 @@ func (m *Model) hostTargetInfoCmd(host *hostModel) tea.Cmd {
 		Foreground(subtleColor).
 		Render("Querying nix for information on "+host.name) + "\n"
 	host.status.contentPanel.SetContent(intro)
+	m.setVisibleHostTab(hostTabStatus)
 	m.updateContentPanel()
 
 	return func() tea.Msg {
@@ -448,13 +466,8 @@ func (m *Model) handleErrorFlashMsg(msg errorFlashMsg) tea.Cmd {
 
 func (m *Model) startHostInteractiveSSH() tea.Cmd {
 	host := m.selectedHost
-
-	if host.target == nil {
-		return func() tea.Msg {
-			return errorFlashMsg{
-				text: fmt.Sprintf("Target info for host %q not yet available", host.name),
-			}
-		}
+	if ok, cmd := requireHostTarget("startHostInteractiveSSH", host); !ok {
+		return cmd
 	}
 
 	slog.Info("starting interactive SSH", "host", host.name)
@@ -517,8 +530,18 @@ func (m Model) View() string {
 		if m.selectedHost != nil {
 			tabName = hostTabNames[m.selectedHost.hostTab]
 			hostName = m.selectedHost.name
-			if sr := m.selectedHost.status.runner; sr != nil {
-				state = sr.StateString()
+
+			var runner *runner.Model
+			switch m.selectedHost.hostTab {
+			case hostTabDeploy:
+				runner = m.selectedHost.deploy.runner
+			case hostTabRunCmd:
+				runner = m.selectedHost.runCmd.runner
+			case hostTabStatus:
+				runner = m.selectedHost.status.runner
+			}
+			if runner != nil {
+				state = runner.StateString()
 			}
 		}
 
@@ -585,4 +608,20 @@ func calculateSizes(win tea.WindowSizeMsg) layoutSizes {
 	s.contentPanel.height = win.Height - contentHeaderHeight - hintBarHeight - frameHeight
 
 	return s
+}
+
+func requireHostTarget(logName string, host *hostModel) (bool, tea.Cmd) {
+	if host == nil {
+		slog.Error(logName + " called with nil host (bug)")
+		return false, nil
+	}
+	if host.target == nil {
+		return false, func() tea.Msg {
+			return errorFlashMsg{
+				text: fmt.Sprintf("Target info for host %q not yet available", host.name),
+			}
+		}
+	}
+
+	return true, nil
 }

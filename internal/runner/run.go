@@ -32,10 +32,13 @@ type Model struct {
 }
 
 // NewLocal constructs a runner for a local command.
-func NewLocal(onUpdate func(*Model) tea.Msg, prog string, args ...string) *Model {
+func NewLocal(onUpdate func(*Model) tea.Msg, dir string, prog string, args ...string) *Model {
 	r := newRunner(onUpdate, prog, args...)
-	r.dest = "local"
 	r.cmd = exec.Command(prog, args...)
+	r.cmd.Dir = dir
+	r.cmd.Stdout = r.output
+	r.cmd.Stderr = r.output
+	r.dest = "local"
 
 	slog.Debug("Local runner created", "prog", prog, "args", args)
 
