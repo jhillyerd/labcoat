@@ -48,7 +48,7 @@ func TestBlock(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	np := npool.New("test", 2)
+	np := npool.New("test", 1)
 
 	w1, err := np.Get(ctx)
 	require.NoError(t, err)
