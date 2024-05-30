@@ -33,23 +33,11 @@ type Model struct {
 
 // NewLocal constructs a runner for a local command.
 func NewLocal(onUpdate func(*Model) tea.Msg, prog string, args ...string) *Model {
-	r := &Model{
-		prog:     prog,
-		args:     args,
-		dest:     "local",
-		cmd:      exec.Command(prog, args...),
-		onUpdate: onUpdate,
-		notify:   make(chan struct{}, 1),
-	}
+	r := newRunner(onUpdate, prog, args...)
+	r.dest = "local"
+	r.cmd = exec.Command(prog, args...)
 
-	r.output = newBuffer(func() {
-		select {
-		case r.notify <- struct{}{}:
-		default:
-		}
-	})
-	r.cmd.Stdout = r.output
-	r.cmd.Stderr = r.output
+	slog.Debug("Local runner created", "prog", prog, "args", args)
 
 	return r
 }
@@ -67,10 +55,13 @@ func NewRemote(
 	sshArgs := []string{"-T", "-oBatchMode=yes", dest, prog}
 	sshArgs = append(sshArgs, args...)
 
-	r := NewLocal(onUpdate, "ssh", sshArgs...)
-	r.prog = prog
-	r.args = args
+	r := newRunner(onUpdate, prog, args...)
+	r.cmd = exec.Command("ssh", sshArgs...)
+	r.cmd.Stdout = r.output
+	r.cmd.Stderr = r.output
 	r.dest = dest
+
+	slog.Debug("Remote runner created", "prog", prog, "args", args, "dest", dest)
 
 	return r
 }
@@ -85,13 +76,33 @@ func NewRemoteScript(
 	}
 	dest += host
 
-	sshArgs := []string{"-T", "-oBatchMode=yes", dest, "bash", "-s"}
-
-	r := NewLocal(onUpdate, "ssh", sshArgs...)
-	r.prog = name
-	r.args = []string{}
-	r.dest = dest
+	r := newRunner(onUpdate, name)
+	r.cmd = exec.Command("ssh", "-T", "-oBatchMode=yes", dest, "bash", "-s")
 	r.cmd.Stdin = strings.NewReader(script)
+	r.cmd.Stdout = r.output
+	r.cmd.Stderr = r.output
+	r.dest = dest
+
+	slog.Debug("Remote runner created", "script", name, "dest", dest)
+
+	return r
+}
+
+// newRunner creates a basic Model, which further requires `cmd` and `dest` to be populated.
+func newRunner(onUpdate func(*Model) tea.Msg, prog string, args ...string) *Model {
+	r := &Model{
+		prog:     prog,
+		args:     args,
+		onUpdate: onUpdate,
+		notify:   make(chan struct{}, 1),
+	}
+
+	r.output = newBuffer(func() {
+		select {
+		case r.notify <- struct{}{}:
+		default:
+		}
+	})
 
 	return r
 }

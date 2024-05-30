@@ -27,7 +27,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 
 // ShortHelp implements help.KeyMap.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Filter, k.Status, k.SSHInto, k.Quit}
+	return []key.Binding{k.Up, k.Down, k.Filter, k.Status, k.SSHInto, k.Reboot, k.Quit}
 }
 
 var DefaultKeyMap = KeyMap{

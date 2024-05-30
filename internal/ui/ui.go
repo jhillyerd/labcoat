@@ -224,7 +224,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Reboot):
 			return m, func() tea.Msg {
 				return confirmationMsg{
-					text: "reboot? y/n",
+					text:   fmt.Sprintf("Confirm reboot of %q? y/n:", m.selectedHost.target.DeployHost),
+					yesCmd: m.hostRunCommandCmd(m.selectedHost, "ls", "/"),
 				}
 			}
 
@@ -250,6 +251,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case hostStatusMsg:
 		return m, m.handleHostStatusMsg(msg)
 
+	case hostRunCommandMsg:
+		return m, m.handleHostRunCommandMsg(msg)
+
+	case hostRunCommandOutputMsg:
+		return m, m.handleHostRunCommandOutputMsg(msg)
+
 	case tea.WindowSizeMsg:
 		m.sizes = calculateSizes(msg)
 		m.hostList.SetSize(m.sizes.hostList.width, m.sizes.hostList.height)
@@ -258,7 +265,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case confirmationMsg:
-		slog.Debug("Start confirmation", "text", msg.text)
 		m.confirmation = &msg
 		return m, nil
 
