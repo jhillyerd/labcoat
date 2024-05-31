@@ -1,12 +1,14 @@
 package runner
 
 import (
+	"context"
 	"log/slog"
 	"os/exec"
 	"strings"
 	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 const (
@@ -19,6 +21,11 @@ const (
 // Model runner runs commands and collects their output.
 type Model struct {
 	sync.RWMutex
+
+	Styles struct {
+		StatusSuffix lipgloss.Style
+	}
+
 	prog  string
 	args  []string
 	dest  string
@@ -29,15 +36,19 @@ type Model struct {
 	output   *buffer              // Permanent output buffer.
 	onUpdate func(*Model) tea.Msg // Construct msg when there is new output.
 	notify   chan struct{}        // Pinged when data is written to buffer.
+	cancel   func()
 }
 
 // NewLocal constructs a runner for a local command.
-func NewLocal(onUpdate func(*Model) tea.Msg, dir string, prog string, args ...string) *Model {
+func NewLocal(ctx context.Context, onUpdate func(*Model) tea.Msg, dir string, prog string, args ...string) *Model {
+	ctx, cancel := context.WithCancel(ctx)
+
 	r := newRunner(onUpdate, prog, args...)
-	r.cmd = exec.Command(prog, args...)
+	r.cmd = exec.CommandContext(ctx, prog, args...)
 	r.cmd.Dir = dir
 	r.cmd.Stdout = r.output
 	r.cmd.Stderr = r.output
+	r.cancel = cancel
 	r.dest = "local"
 
 	slog.Debug("Local runner created", "prog", prog, "args", args)
@@ -46,9 +57,11 @@ func NewLocal(onUpdate func(*Model) tea.Msg, dir string, prog string, args ...st
 }
 
 func NewRemote(
-	onUpdate func(*Model) tea.Msg, host string, user string,
+	ctx context.Context, onUpdate func(*Model) tea.Msg, host string, user string,
 	prog string, args ...string,
 ) *Model {
+	ctx, cancel := context.WithCancel(ctx)
+
 	dest := "ssh://"
 	if user != "" {
 		dest += user + "@"
@@ -59,9 +72,10 @@ func NewRemote(
 	sshArgs = append(sshArgs, args...)
 
 	r := newRunner(onUpdate, prog, args...)
-	r.cmd = exec.Command("ssh", sshArgs...)
+	r.cmd = exec.CommandContext(ctx, "ssh", sshArgs...)
 	r.cmd.Stdout = r.output
 	r.cmd.Stderr = r.output
+	r.cancel = cancel
 	r.dest = dest
 
 	slog.Debug("Remote runner created", "prog", prog, "args", args, "dest", dest)
@@ -70,9 +84,11 @@ func NewRemote(
 }
 
 func NewRemoteScript(
-	onUpdate func(*Model) tea.Msg, host string, user string,
+	ctx context.Context, onUpdate func(*Model) tea.Msg, host string, user string,
 	name string, script string,
 ) *Model {
+	ctx, cancel := context.WithCancel(ctx)
+
 	dest := "ssh://"
 	if user != "" {
 		dest += user + "@"
@@ -80,10 +96,11 @@ func NewRemoteScript(
 	dest += host
 
 	r := newRunner(onUpdate, name)
-	r.cmd = exec.Command("ssh", "-T", "-oBatchMode=yes", dest, "bash", "-s")
+	r.cmd = exec.CommandContext(ctx, "ssh", "-T", "-oBatchMode=yes", dest, "bash", "-s")
 	r.cmd.Stdin = strings.NewReader(script)
 	r.cmd.Stdout = r.output
 	r.cmd.Stderr = r.output
+	r.cancel = cancel
 	r.dest = dest
 
 	slog.Debug("Remote runner created", "script", name, "dest", dest)
@@ -106,6 +123,8 @@ func newRunner(onUpdate func(*Model) tea.Msg, prog string, args ...string) *Mode
 		default:
 		}
 	})
+
+	r.Styles.StatusSuffix = lipgloss.NewStyle()
 
 	return r
 }
@@ -133,8 +152,13 @@ func (r *Model) Successful() bool {
 
 func (r *Model) waitForOutput() tea.Cmd {
 	return func() tea.Msg {
-		if !r.Running() {
-			// Don't wait on completed/failed process output.
+		if r.Complete() {
+			// Render status text and stop waiting for output.
+			r.Lock()
+			defer r.Unlock()
+			s := r.Styles.StatusSuffix.Render("\n[" + stateToString(r.state) + "]")
+			_, _ = r.output.Write([]byte(s))
+
 			return nil
 		}
 
@@ -179,6 +203,17 @@ func (r *Model) View() string {
 	defer r.RUnlock()
 
 	return r.output.String()
+}
+
+// Cancel running process.
+func (r *Model) Cancel() {
+	if r.cancel != nil {
+		r.cancel()
+
+		r.Lock()
+		defer r.Unlock()
+		_, _ = r.output.Write([]byte("\n[Interrupt]\n"))
+	}
 }
 
 // Destination returns the SSH URL or `local`.

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"log/slog"
 	"strings"
 
@@ -56,8 +57,11 @@ func (m *Model) handleHostDeployMsg(msg hostDeployMsg) tea.Cmd {
 	}
 	args = append(args, "switch")
 
-	srunner := runner.NewLocal(onUpdate, m.flakePath, "nixos-rebuild", args...)
+	ctx, cancel := context.WithCancel(m.ctx)
+	srunner := runner.NewLocal(ctx, onUpdate, m.flakePath, "nixos-rebuild", args...)
+	srunner.Styles.StatusSuffix = subtleStyle
 	host.deploy.runner = srunner
+	host.deploy.cancel = cancel
 
 	// Init status display.
 	intro := lipgloss.NewStyle().

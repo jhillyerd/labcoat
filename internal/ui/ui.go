@@ -37,6 +37,7 @@ const (
 var hostTabNames = []string{"Host Status", "Deploy", "Run Command"}
 
 type Model struct {
+	ctx          context.Context
 	program      *tea.Program
 	config       config.Config
 	ready        bool // true once screen size is known.
@@ -66,6 +67,7 @@ type hostModel struct {
 		intro        string // Rendered intro text: command, host, etc.
 		contentPanel viewport.Model
 		runner       *runner.Model
+		cancel       func()
 	}
 	runCmd struct {
 		intro        string // Rendered intro text: command, host, etc.
@@ -113,6 +115,7 @@ func New(conf config.Config, keys config.KeyMap, flakePath string, hostNames []s
 	}
 
 	return Model{
+		ctx:       context.Background(),
 		config:    conf,
 		viewMode:  viewModeHosts,
 		flakePath: flakePath,
@@ -185,8 +188,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		// slog.Debug("tea.KeyMsg", "key", msg)
 
-		if msg.String() == "ctrl+c" {
-			// Ctrl-C overrides all view states to exit.
+		if msg.String() == "ctrl+\\" {
+			// Ctrl-\ overrides all view states to exit.
 			return m, tea.Quit
 		}
 
@@ -196,6 +199,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Exit error display.
 				m.viewMode = viewModeHosts
 			}
+
+			return m, nil
+		}
+
+		if msg.String() == "ctrl+c" {
+			m.withVisibleRunner(func(r *runner.Model) {
+				r.Cancel()
+			})
 
 			return m, nil
 		}
@@ -531,18 +542,9 @@ func (m Model) View() string {
 			tabName = hostTabNames[m.selectedHost.hostTab]
 			hostName = m.selectedHost.name
 
-			var runner *runner.Model
-			switch m.selectedHost.hostTab {
-			case hostTabDeploy:
-				runner = m.selectedHost.deploy.runner
-			case hostTabRunCmd:
-				runner = m.selectedHost.runCmd.runner
-			case hostTabStatus:
-				runner = m.selectedHost.status.runner
-			}
-			if runner != nil {
-				state = runner.StateString()
-			}
+			m.withVisibleRunner(func(r *runner.Model) {
+				state = r.StateString()
+			})
 		}
 
 		scroll = fmt.Sprintf("%3.0f%%", m.contentPanel.ScrollPercent()*100)
@@ -624,4 +626,21 @@ func requireHostTarget(logName string, host *hostModel) (bool, tea.Cmd) {
 	}
 
 	return true, nil
+}
+
+func (m *Model) withVisibleRunner(fn func(*runner.Model)) {
+	var runner *runner.Model
+
+	switch m.selectedHost.hostTab {
+	case hostTabDeploy:
+		runner = m.selectedHost.deploy.runner
+	case hostTabRunCmd:
+		runner = m.selectedHost.runCmd.runner
+	case hostTabStatus:
+		runner = m.selectedHost.status.runner
+	}
+
+	if runner != nil {
+		fn(runner)
+	}
 }

@@ -34,8 +34,9 @@ func (m *Model) hostStatusCmd(host *hostModel) tea.Cmd {
 	}
 
 	script := runner.NewScript(m.config.Commands.StatusCmds)
-	srunner = runner.NewRemoteScript(
-		onUpdate, host.target.DeployHost, host.target.DeployUser, "host status (script)", script)
+	srunner = runner.NewRemoteScript(m.ctx, onUpdate,
+		host.target.DeployHost, host.target.DeployUser, "host status (script)", script)
+	srunner.Styles.StatusSuffix = subtleStyle
 
 	host.status.runner = srunner
 

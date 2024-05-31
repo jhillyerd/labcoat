@@ -48,8 +48,10 @@ func (m *Model) handleHostRunCommandMsg(msg hostRunCommandMsg) tea.Cmd {
 		return hostRunCommandOutputMsg{host: host, final: r.Complete()}
 	}
 
-	srunner := runner.NewRemote(onUpdate, host.target.DeployHost, host.target.DeployUser,
+	srunner := runner.NewRemote(m.ctx, onUpdate,
+		host.target.DeployHost, host.target.DeployUser,
 		msg.prog, msg.args...)
+	srunner.Styles.StatusSuffix = subtleStyle
 	host.runCmd.runner = srunner
 
 	// Init status display.
