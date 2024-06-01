@@ -59,6 +59,13 @@ func (m *Model) handleHostDeployMsg(msg hostDeployMsg) tea.Cmd {
 
 	ctx, cancel := context.WithCancel(m.ctx)
 	srunner := runner.NewLocal(ctx, onUpdate, m.flakePath, "nixos-rebuild", args...)
+	srunner.PassEnv("PATH")
+
+	// Attempt to fix systemd-run hang, but it appears it's a nixos bug, may be fixed in 24.xx:
+	// https://github.com/NixOS/nixpkgs/issues/262686
+	// https://github.com/NixOS/nixpkgs/pull/263360 (merged)
+	srunner.SetEnv("NIX_SSHOPTS", "-T -oBatchMode=yes")
+
 	srunner.Styles.StatusSuffix = subtleStyle
 	host.deploy.runner = srunner
 	host.deploy.cancel = cancel

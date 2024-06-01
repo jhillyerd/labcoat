@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"log/slog"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -190,6 +191,20 @@ func (r *Model) Init() tea.Cmd {
 	}
 
 	return tea.Batch(cmd, r.waitForOutput())
+}
+
+// PassEnv copies a parent environment variable for use by the child process.
+func (r *Model) PassEnv(name string) {
+	value := os.Getenv(name)
+	r.SetEnv(name, value)
+}
+
+// SetEnv appends an environment variable definition.  Due to the way `exec.Cmd` works, the first
+// call to this effectively stops the parent environment from being passed to the child process.
+func (r *Model) SetEnv(name string, value string) {
+	r.Lock()
+	defer r.Unlock()
+	r.cmd.Env = append(r.cmd.Env, name+"="+value)
 }
 
 // Update implements tea.Model.

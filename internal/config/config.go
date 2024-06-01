@@ -34,6 +34,7 @@ func Default() Config {
 	return Config{
 		Commands: Commands{
 			StatusCmds: []string{
+				"date",
 				"systemctl --failed",
 				"uname -a",
 				"uptime",
