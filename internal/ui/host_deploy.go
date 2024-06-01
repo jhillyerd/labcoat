@@ -84,6 +84,8 @@ func (m *Model) handleHostDeployOutputMsg(msg hostDeployOutputMsg) tea.Cmd {
 	_, cmd := srunner.Update(nil)
 
 	// Render and cache output content.
+	panel := &host.deploy.contentPanel
+	follow := panel.AtBottom()
 	output := host.deploy.intro
 	output += runner.FormatOutput(
 		srunner.View(),
@@ -97,6 +99,10 @@ func (m *Model) handleHostDeployOutputMsg(msg hostDeployOutputMsg) tea.Cmd {
 	// TODO configurable line wrapping?
 	output = lipgloss.NewStyle().MaxWidth(m.sizes.contentPanel.width).Render(output)
 
-	host.deploy.contentPanel.SetContent(output)
+	panel.SetContent(output)
+	if follow {
+		panel.GotoBottom()
+	}
+
 	return cmd
 }
