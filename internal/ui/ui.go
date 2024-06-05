@@ -242,6 +242,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.hostDeployCmd(m.selectedHost)
 
 		case key.Matches(msg, m.keys.Reboot):
+			if ok, cmd := requireHostTarget("Reboot", m.selectedHost); !ok {
+				return m, cmd
+			}
 			return m, func() tea.Msg {
 				return confirmationMsg{
 					text:   fmt.Sprintf("Confirm reboot of %q? y/n:", m.selectedHost.target.DeployHost),
