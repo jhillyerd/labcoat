@@ -515,6 +515,7 @@ var (
 			Foreground(labelFgColor).Background(labelBgColor)
 	hostListStyle      = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Padding(0, 1)
 	contentHeaderStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Padding(0, 1)
+	contentFooterStyle = lipgloss.NewStyle().Reverse(true).Padding(0, 1)
 	contentPanelStyle  = lipgloss.NewStyle().
 				Border(lipgloss.NormalBorder(), false, true, true, true).Padding(0, 1)
 	hintBarStyle       = lipgloss.NewStyle().Padding(0, 1)
@@ -533,27 +534,30 @@ func (m Model) View() string {
 	case viewModeHosts:
 		hosts := hostListStyle.Render(m.hostList.View())
 
+		scroll := "(END)"
+		if !m.contentPanel.AtBottom() {
+			scroll = fmt.Sprintf("%.0f%%", m.contentPanel.ScrollPercent()*100)
+		}
+
 		tabName := "Unknown"
 		hostName := "None"
-		state := "Unknown"
-		scroll := "---%"
-
 		if m.selectedHost != nil {
 			tabName = hostTabNames[m.selectedHost.hostTab]
 			hostName = m.selectedHost.name
 
 			m.withVisibleRunner(func(r *runner.Model) {
-				state = r.StateString()
+				if r.Running() {
+					scroll += " - Running"
+				}
 			})
 		}
 
-		scroll = fmt.Sprintf("%3.0f%%", m.contentPanel.ScrollPercent()*100)
-
 		contentHeader := contentHeaderStyle.Render(
 			lipgloss.PlaceHorizontal(m.sizes.contentHeader.width, lipgloss.Center,
-				tabName+" | "+hostName+" | "+state+" | Scroll: "+scroll))
+				tabName+" | "+hostName))
+		contentFooter := contentFooterStyle.Render(scroll)
 		content := contentHeader + "\n" +
-			contentPanelStyle.Render(m.contentPanel.View())
+			contentPanelStyle.Render(m.contentPanel.View()+"\n"+contentFooter)
 
 		// Display help or error flash if present.
 		hintBar := ""
@@ -604,10 +608,12 @@ func calculateSizes(win tea.WindowSizeMsg) layoutSizes {
 	s.contentHeader.width = win.Width - hostListWidth - frameWidth
 	s.contentHeader.height = 1
 	contentHeaderHeight := s.contentHeader.height + frameHeight
+	contentFooterHeight := 1
 
 	frameWidth, frameHeight = contentPanelStyle.GetFrameSize()
 	s.contentPanel.width = win.Width - hostListWidth - frameWidth
-	s.contentPanel.height = win.Height - contentHeaderHeight - hintBarHeight - frameHeight
+	s.contentPanel.height = win.Height -
+		contentHeaderHeight - contentFooterHeight - hintBarHeight - frameHeight
 
 	return s
 }
