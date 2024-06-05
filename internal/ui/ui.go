@@ -517,13 +517,19 @@ var (
 	labelStyle  = lipgloss.NewStyle().MarginTop(1).Padding(0, 1).
 			Foreground(labelFgColor).Background(labelBgColor)
 	hostListStyle      = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Padding(0, 1)
-	contentHeaderStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Padding(0, 1)
+	tabSuffixStyle     = lipgloss.NewStyle().Border(tabSuffixBorder(), true).Padding(0, 1)
 	contentFooterStyle = lipgloss.NewStyle().Reverse(true).Padding(0, 1)
 	contentPanelStyle  = lipgloss.NewStyle().
 				Border(lipgloss.NormalBorder(), false, true, true, true).Padding(0, 1)
 	hintBarStyle       = lipgloss.NewStyle().Padding(0, 1)
 	errorFlashStyle    = hintBarStyle.Foreground(errorColor)
 	confirmDialogStyle = hintBarStyle.Foreground(confirmColor)
+
+	inactiveTabBorder = tabBorderWithBottom("┴", "─", "┴")
+	activeTabBorder   = tabBorderWithBottom("┘", " ", "└")
+	highlightColor    = lipgloss.AdaptiveColor{Light: "#874BFD", Dark: "#7D56F4"}
+	activeTabStyle    = lipgloss.NewStyle().Border(activeTabBorder, true).Padding(0, 1)
+	inactiveTabStyle  = activeTabStyle.Border(inactiveTabBorder, true).Foreground(subtleColor)
 )
 
 // View implements tea.Model.
@@ -542,10 +548,10 @@ func (m Model) View() string {
 			scroll = fmt.Sprintf("%.0f%%", m.contentPanel.ScrollPercent()*100)
 		}
 
-		tabName := "Unknown"
 		hostName := "None"
+		selectedTab := 0
 		if m.selectedHost != nil {
-			tabName = hostTabNames[m.selectedHost.hostTab]
+			selectedTab = m.selectedHost.hostTab
 			hostName = m.selectedHost.name
 
 			m.withVisibleRunner(func(r *runner.Model) {
@@ -555,9 +561,33 @@ func (m Model) View() string {
 			})
 		}
 
-		contentHeader := contentHeaderStyle.Render(
-			lipgloss.PlaceHorizontal(m.sizes.contentHeader.width, lipgloss.Center,
-				tabName+" | "+hostName))
+		var renderedTabs []string
+		var tabBarWidth int
+		for i, t := range hostTabNames {
+			var style lipgloss.Style
+			isFirst, isActive := i == 0, i == selectedTab
+			if isActive {
+				style = activeTabStyle
+			} else {
+				style = inactiveTabStyle
+			}
+			border, _, _, _, _ := style.GetBorder()
+			if isFirst && isActive {
+				border.BottomLeft = "│"
+			} else if isFirst && !isActive {
+				border.BottomLeft = "├"
+			}
+			style = style.Border(border)
+			rendered := style.Render(t)
+			tabBarWidth += lipgloss.Width(rendered)
+			renderedTabs = append(renderedTabs, rendered)
+		}
+
+		barSuffix := lipgloss.PlaceHorizontal(
+			m.sizes.contentHeader.width-tabBarWidth, lipgloss.Center, hostName)
+		renderedTabs = append(renderedTabs, tabSuffixStyle.Render(barSuffix))
+		contentHeader := lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
+
 		contentFooter := contentFooterStyle.Render(scroll)
 		content := contentHeader + "\n" +
 			contentPanelStyle.Render(m.contentPanel.View()+"\n"+contentFooter)
@@ -607,7 +637,7 @@ func calculateSizes(win tea.WindowSizeMsg) layoutSizes {
 	s.hintBar.width = win.Width - hostListWidth - hintBarStyle.GetHorizontalFrameSize()
 
 	// Content.
-	frameWidth, frameHeight = contentHeaderStyle.GetFrameSize()
+	frameWidth, frameHeight = activeTabStyle.GetFrameSize()
 	s.contentHeader.width = win.Width - hostListWidth - frameWidth
 	s.contentHeader.height = 1
 	contentHeaderHeight := s.contentHeader.height + frameHeight
@@ -652,4 +682,25 @@ func (m *Model) withVisibleRunner(fn func(*runner.Model)) {
 	if runner != nil {
 		fn(runner)
 	}
+}
+
+func tabBorderWithBottom(left, middle, right string) lipgloss.Border {
+	border := lipgloss.RoundedBorder()
+	border.BottomLeft = left
+	border.Bottom = middle
+	border.BottomRight = right
+	return border
+}
+
+func tabSuffixBorder() lipgloss.Border {
+	border := lipgloss.NormalBorder()
+	border.BottomRight = border.TopRight
+	border.BottomLeft = border.Bottom
+
+	border.Top = " "
+	border.TopRight = " "
+	border.Right = " "
+	border.TopLeft = " "
+	border.Left = " "
+	return border
 }
