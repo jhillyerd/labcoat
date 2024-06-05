@@ -522,8 +522,8 @@ var (
 	contentPanelStyle  = lipgloss.NewStyle().
 				Border(lipgloss.NormalBorder(), false, true, true, true).Padding(0, 1)
 	hintBarStyle       = lipgloss.NewStyle().Padding(0, 1)
-	errorFlashStyle    = hintBarStyle.Copy().Foreground(errorColor)
-	confirmDialogStyle = hintBarStyle.Copy().Foreground(confirmColor)
+	errorFlashStyle    = hintBarStyle.Foreground(errorColor)
+	confirmDialogStyle = hintBarStyle.Foreground(confirmColor)
 )
 
 // View implements tea.Model.

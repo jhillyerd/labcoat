@@ -93,7 +93,7 @@ type itemDelegate struct {
 
 func newItemDelegate(maxWidth int) itemDelegate {
 	itemStyle := lipgloss.NewStyle().PaddingLeft(1)
-	selectedItemStyle := itemStyle.Copy().PaddingLeft(0).Foreground(lipgloss.Color("170"))
+	selectedItemStyle := itemStyle.PaddingLeft(0).Foreground(lipgloss.Color("170"))
 
 	return itemDelegate{
 		itemStyle:         itemStyle,
