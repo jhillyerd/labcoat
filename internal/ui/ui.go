@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -54,6 +55,7 @@ type Model struct {
 	help         help.Model
 	spinner      spinner.Model
 	confirmation *confirmationMsg
+	textInput    *textInput
 	error        string
 	flashText    string
 	flashTimer   *time.Timer
@@ -80,6 +82,11 @@ type hostModel struct {
 		contentPanel viewport.Model
 		runner       *runner.Model
 	}
+}
+
+type textInput struct {
+	model    textinput.Model
+	submitFn func(string) tea.Cmd
 }
 
 type layoutSizes struct {
@@ -163,6 +170,11 @@ type confirmationMsg struct {
 	noCmd  tea.Cmd
 }
 
+type textInputPromptMsg struct {
+	prompt   string
+	submitFn func(string) tea.Cmd
+}
+
 type criticalErrorMsg struct {
 	detail string
 }
@@ -203,14 +215,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		if msg.String() == "ctrl+c" {
-			m.withVisibleRunner(func(r *runner.Model) {
-				r.Cancel()
-			})
-
-			return m, nil
-		}
-
 		if m.hostList.FilterState() == list.Filtering {
 			// User is entering filter text, disable keymaps.
 			break
@@ -234,6 +238,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		if m.textInput != nil {
+			// Active text input dialog is capturing key presses.
+			switch msg.String() {
+			case "ctrl+c", "esc":
+				m.textInput = nil
+				return m, nil
+
+			case "enter":
+				value := m.textInput.model.Value()
+				submitFn := m.textInput.submitFn
+				m.textInput = nil
+				return m, submitFn(value)
+			}
+
+			ti, cmd := m.textInput.model.Update(msg)
+			m.textInput.model = ti
+
+			return m, cmd
+		}
+
+		if msg.String() == "ctrl+c" {
+			m.withVisibleRunner(func(r *runner.Model) {
+				r.Cancel()
+			})
+
+			return m, nil
+		}
+
 		switch {
 		case key.Matches(msg, m.keys.NextTab):
 			return m, m.handleNextTabKey()
@@ -249,6 +281,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return confirmationMsg{
 					text:   fmt.Sprintf("Confirm reboot of %q? y/n:", m.selectedHost.target.DeployHost),
 					yesCmd: m.hostRunCommandCmd(m.selectedHost, "/run/current-system/sw/bin/reboot"),
+				}
+			}
+
+		case key.Matches(msg, m.keys.RunCommandPrompt):
+			if ok, cmd := requireHostTarget("RunCommand", m.selectedHost); !ok {
+				return m, cmd
+			}
+			return m, func() tea.Msg {
+				return textInputPromptMsg{
+					prompt: fmt.Sprintf("Run on %q: ", m.selectedHost.target.DeployHost),
+					submitFn: func(cmd string) tea.Cmd {
+						return m.hostRunCommandCmd(m.selectedHost, cmd)
+					},
 				}
 			}
 
@@ -296,6 +341,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case confirmationMsg:
 		m.confirmation = &msg
 		return m, nil
+
+	case textInputPromptMsg:
+		ti := textinput.New()
+		ti.Prompt = msg.prompt
+		ti.Focus()
+		m.textInput = &textInput{
+			model:    ti,
+			submitFn: msg.submitFn,
+		}
 
 	case criticalErrorMsg:
 		m.viewMode = viewModeError
@@ -594,11 +648,17 @@ func (m Model) View() string {
 
 		// Display help or error flash if present.
 		hintBar := ""
-		if m.flashText != "" {
+		switch {
+		case m.flashText != "":
 			hintBar = errorFlashStyle.Render(m.flashText)
-		} else if m.confirmation != nil {
+
+		case m.confirmation != nil:
 			hintBar = confirmDialogStyle.Render(m.confirmation.text)
-		} else {
+
+		case m.textInput != nil:
+			hintBar = m.textInput.model.View()
+
+		default:
 			hintBar = hintBarStyle.Render(m.help.View(m.keys))
 		}
 
