@@ -541,7 +541,7 @@ func (m Model) View() string {
 
 	switch m.viewMode {
 	case viewModeHosts:
-		hosts := hostListStyle.Render(m.hostList.View())
+		hosts := hostListStyle.Width(m.sizes.hostList.width + 2).Render(m.hostList.View())
 
 		scroll := "(END)"
 		if !m.contentPanel.AtBottom() {
