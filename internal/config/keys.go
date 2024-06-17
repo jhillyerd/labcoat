@@ -14,6 +14,7 @@ type KeyMap struct {
 	ScrollDown key.Binding
 	NextTab    key.Binding
 	Filter     key.Binding
+	Pager      key.Binding
 
 	// Commands.
 	Deploy           key.Binding
@@ -67,6 +68,10 @@ var DefaultKeyMap = KeyMap{
 	Filter: key.NewBinding(
 		key.WithKeys("/"),
 		key.WithHelp("/", "filter hosts"),
+	),
+	Pager: key.NewBinding(
+		key.WithKeys("p"),
+		key.WithHelp("p", "open pager"),
 	),
 
 	Deploy: key.NewBinding(

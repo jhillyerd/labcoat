@@ -1,7 +1,9 @@
 package runner
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -27,12 +29,13 @@ type Model struct {
 		StatusSuffix lipgloss.Style
 	}
 
-	prog  string
-	args  []string
-	dest  string
-	cmd   *exec.Cmd
-	state int
-	err   error
+	prog   string
+	args   []string
+	dest   string
+	cmd    *exec.Cmd
+	state  int
+	err    error
+	closed bool // No more writes accepted when true.
 
 	output   *buffer              // Permanent output buffer.
 	onUpdate func(*Model) tea.Msg // Construct msg when there is new output.
@@ -154,9 +157,14 @@ func (r *Model) Successful() bool {
 func (r *Model) waitForOutput() tea.Cmd {
 	return func() tea.Msg {
 		if r.Complete() {
-			// Render status text and stop waiting for output.
 			r.Lock()
 			defer r.Unlock()
+			if r.closed {
+				return nil
+			}
+
+			// Render status text and stop waiting for output.
+			r.closed = true
 			s := r.Styles.StatusSuffix.Render("\n[" + stateToString(r.state) + "]")
 			_, _ = r.output.Write([]byte(s))
 
@@ -218,6 +226,15 @@ func (r *Model) View() string {
 	defer r.RUnlock()
 
 	return r.output.String()
+}
+
+// WriteTo writes buffer contents to the provided writer.
+func (r *Model) CopyTo(w io.Writer) (int64, error) {
+	r.output.RLock()
+	defer r.output.RUnlock()
+
+	br := bytes.NewReader(r.output.buf)
+	return io.Copy(w, br)
 }
 
 // Cancel running process.

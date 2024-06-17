@@ -164,6 +164,8 @@ type hostHoverMsg struct {
 	hostName string
 }
 
+type openPagerMsg struct{}
+
 type confirmationMsg struct {
 	text   string
 	yesCmd tea.Cmd
@@ -273,6 +275,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Deploy):
 			return m, m.hostDeployCmd(m.selectedHost)
 
+		case key.Matches(msg, m.keys.Pager):
+			return m, func() tea.Msg { return openPagerMsg{} }
+
 		case key.Matches(msg, m.keys.Reboot):
 			if ok, cmd := requireHostTarget("Reboot", m.selectedHost); !ok {
 				return m, cmd
@@ -330,6 +335,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case hostRunCommandOutputMsg:
 		return m, m.handleHostRunCommandOutputMsg(msg)
+
+	case openPagerMsg:
+		return m, m.handleOpenPagerMsg(msg)
 
 	case tea.WindowSizeMsg:
 		m.sizes = calculateSizes(msg)
@@ -511,6 +519,48 @@ func (m *Model) handleHostTargetInfoMsg(msg hostTargetInfoMsg) tea.Cmd {
 
 	// Fetch host status now that we know target info.
 	return m.hostStatusCmd(host)
+}
+
+func (m *Model) handleOpenPagerMsg(_ openPagerMsg) tea.Cmd {
+	// Write visible runner buffer to temp file.
+	f, err := os.CreateTemp("", "*.txt")
+	if err != nil {
+		slog.Error("Failed to create temp file", "err", err)
+		return func() tea.Msg { return errorFlashMsg{text: "Pager: " + err.Error()} }
+	}
+
+	var withErr error
+	m.withVisibleRunner(func(r *runner.Model) {
+		if _, err := r.CopyTo(f); err != nil {
+			_ = f.Close()
+			slog.Error("Failed to write temp file", "err", err)
+			withErr = err
+			return
+		}
+
+	})
+	if withErr != nil {
+		return func() tea.Msg { return errorFlashMsg{text: "Pager: " + withErr.Error()} }
+	}
+
+	fname := f.Name()
+	if err := f.Close(); err != nil {
+		slog.Error("Failed to close temp file", "err", err)
+		return func() tea.Msg { return errorFlashMsg{text: "Pager: " + err.Error()} }
+	}
+
+	// TODO handle pager arguments.
+	cmd := exec.Command(m.config.General.Pager, fname)
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		defer os.Remove(fname)
+
+		if err != nil {
+			slog.Error("Pager failed", "err", err)
+			return errorFlashMsg{text: "Pager: " + err.Error()}
+		}
+
+		return nil
+	})
 }
 
 func (m *Model) handleErrorFlashMsg(msg errorFlashMsg) tea.Cmd {

@@ -9,9 +9,14 @@ import (
 )
 
 type Config struct {
+	General  General  `toml:"general"`
 	Commands Commands `toml:"commands"`
 	Hosts    Hosts    `toml:"hosts" comment:"Host deployment configuration. Nix attrs typically start with 'flake' or 'target'."`
 	Nix      Nix      `toml:"nix"`
+}
+
+type General struct {
+	Pager string `toml:"pager"`
 }
 
 type Commands struct {
@@ -32,6 +37,9 @@ type Nix struct {
 // Default returns the default Config.
 func Default() Config {
 	return Config{
+		General: General{
+			Pager: "less",
+		},
 		Commands: Commands{
 			StatusCmds: []string{
 				"date",

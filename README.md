@@ -9,9 +9,9 @@
 - [x] Launch interactive SSH into target host
 - [x] Reboot target host with confirmation
   - [ ] Use ping to track host status during reboot
-- [ ] Run specified command on target host
+- [x] Run specified command on target host
 - [ ] Run configurable commands on target host, w/ optional confirmation
 - [ ] Record/display per-node command and deployment history
 - [ ] Gather target host deployment/generation state
   - [ ] Flag out-of-date hosts in list UI
-- [ ] External pager support
+- [x] External pager support
