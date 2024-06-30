@@ -3,6 +3,8 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
+	"log"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -15,9 +17,16 @@ import (
 
 func main() {
 	var (
+		help     = flag.Bool("help", false, "Print argument help message")
 		defaults = flag.Bool("defaults", false, "Prints default configuration to stdout and exits")
+		logPath  = flag.String("log", "", "File to write debug logs to")
 	)
 	flag.Parse()
+
+	if *help {
+		flag.PrintDefaults()
+		os.Exit(0)
+	}
 
 	if *defaults {
 		config.PrintDefaults()
@@ -43,15 +52,20 @@ func main() {
 	}
 
 	// Init logging.
-	lf, err := tea.LogToFile("debug.log", "")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "logging error: ", err)
-		os.Exit(1)
-	}
-	defer lf.Close()
+	if *logPath != "" {
+		lf, err := tea.LogToFile(*logPath, "")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "logging error: ", err)
+			os.Exit(1)
+		}
+		defer lf.Close()
 
-	slog.SetLogLoggerLevel(slog.LevelDebug)
-	slog.Info("### STARTUP ###################################################################")
+		slog.SetLogLoggerLevel(slog.LevelDebug)
+		slog.Info("### STARTUP ###################################################################")
+	} else {
+		// Prevent log output corrupting UI.
+		log.SetOutput(io.Discard)
+	}
 
 	// Load host list from flake.
 	flakePath := flag.Arg(0)
