@@ -1,0 +1,22 @@
+name: CI powered by Nix
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  nix-build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install nix
+        uses: cachix/install-nix-action@v18
+        with:
+          extra_nix_config: |
+            access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+      - name: Build binary
+        run: nix build .#labcoat
