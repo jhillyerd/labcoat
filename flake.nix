@@ -25,6 +25,8 @@
 
             # Must be updated if go.mod changes.
             vendorHash = "sha256-v7r7J3itAv72lx7zSkg6VfasfnokXT9H8oNhUuB02O4=";
+
+            meta.mainProgram = "labcoat";
           };
 
           packages.default = self'.packages.labcoat;

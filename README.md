@@ -35,6 +35,40 @@ labcoat is currently incomplete, and alpha quality.  However, it's good enough
 to manage [my homelab], and maybe yours too.
 
 
+## Usage
+
+From the directory containing your systems flake, execute:
+
+```sh
+nix run github:jhillyerd/labcoat
+```
+
+Alternately you may pass the path to a directory containing flake.nix as
+the last argument
+
+```sh
+nix run github:jhillyerd/labcoat -- ~/myflake/
+```
+
+## Configuration
+
+labcoat contains a default configuration, and does not require a configuration
+file.  The `-defaults` argument will print the default configuration to
+`stdout`.
+
+If you want to make changes to the default configuration, it should be stored
+in `$XDG_HOME/labcoat/config.toml`.  labcoat always layers your configuration
+on top of it's defaults, so you may remove or comment out anything you don't
+wish to change.
+
+Create the TOML config file:
+
+```sh
+mkdir -p ~/.config/labcoat
+nix run github:jhillyerd/labcoat -- -defaults > ~/.config/labcoat/config.toml
+```
+
+
 ## Contributing
 
 Contributions are welcome, with the following provisions:
