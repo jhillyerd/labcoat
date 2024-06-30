@@ -84,6 +84,10 @@ func main() {
 		fmt.Fprintln(os.Stderr, nerr.Error())
 		os.Exit(1)
 	}
+	if len(hosts) == 0 {
+		fmt.Fprintln(os.Stderr, "No hosts (nixosConfigurations) found in flake")
+		os.Exit(1)
+	}
 
 	// Launch UI.
 	p := tea.NewProgram(ui.New(*conf, config.DefaultKeyMap, flakePath, hosts), tea.WithAltScreen())
