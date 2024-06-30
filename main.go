@@ -53,14 +53,25 @@ func main() {
 	slog.SetLogLoggerLevel(slog.LevelDebug)
 	slog.Info("### STARTUP ###################################################################")
 
-	// Load host list.
-	flakePath := "/home/james/devel/homelab/nixos"
+	// Load host list from flake.
+	flakePath := flag.Arg(0)
+	if flakePath == "" {
+		flakePath, err = os.Getwd()
+	} else {
+		flakePath, err = filepath.Abs(flakePath)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
+
 	hosts, nerr := nix.GetNames(nix.NamesRequest{FlakePath: flakePath})
 	if nerr != nil {
 		fmt.Fprintln(os.Stderr, nerr.Error())
 		os.Exit(1)
 	}
 
+	// Launch UI.
 	p := tea.NewProgram(ui.New(*conf, config.DefaultKeyMap, flakePath, hosts), tea.WithAltScreen())
 	go p.Send(p)
 	if _, err := p.Run(); err != nil {
