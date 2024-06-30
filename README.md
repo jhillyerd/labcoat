@@ -1,5 +1,17 @@
 # labui
 
+labui is a TUI for deploying flake based [NixOS] systems.  It lets you select
+from a list of `nixosConfigurations` available in your flake, giving you one
+touch access to deploy and inspect those systems.
+
+labui is ideal for managing NixOS lab environments up to a couple dozen
+systems; particularly during the development phase where you do not yet
+know if your configuration works correctly.
+
+For production NixOS environments with many instances of the same configuration,
+you will be better served by a parallel deployment tool such as [Colmena].
+
+
 ## Features
 
 - [x] Automatically fetch node list from nix flake
@@ -17,6 +29,12 @@
 - [x] External pager support
 
 
+## Status
+
+labui is currently incomplete, and alpha quality.  However, it's good enough
+to manage [my homelab], and maybe yours too.
+
+
 ## Contributing
 
 Contributions are welcome, with the following provisions:
@@ -30,3 +48,6 @@ Contributions are welcome, with the following provisions:
 
 
 [Bubble Tea Tutorial]: https://github.com/charmbracelet/bubbletea/tree/master/tutorials/basics
+[Colmena]:             https://github.com/zhaofengli/colmena
+[my homelab]:          https://github.com/jhillyerd/homelab
+[NixOS]:               https://nixos.org/
