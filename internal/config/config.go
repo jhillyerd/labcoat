@@ -20,7 +20,7 @@ type General struct {
 }
 
 type Commands struct {
-	StatusCmds []string `toml:"status-cmds" comment:"List of commands to run to check host status"`
+	StatusCmds []string `toml:"status-cmds" comment:"List of commands to run to display host status"`
 }
 
 type Hosts struct {
@@ -44,6 +44,7 @@ func Default() Config {
 			StatusCmds: []string{
 				"date",
 				"systemctl --failed",
+				"nixos-rebuild --no-build-nix list-generations",
 				"uname -a",
 				"uptime",
 				"df -h -x tmpfs -x overlay",
