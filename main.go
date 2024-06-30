@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/jhillyerd/labui/internal/config"
-	"github.com/jhillyerd/labui/internal/nix"
-	"github.com/jhillyerd/labui/internal/ui"
+	"github.com/jhillyerd/labcoat/internal/config"
+	"github.com/jhillyerd/labcoat/internal/nix"
+	"github.com/jhillyerd/labcoat/internal/ui"
 )
 
 func main() {
@@ -44,7 +44,7 @@ func main() {
 		configRoot = filepath.Join(home, ".config")
 	}
 
-	configPath := filepath.Join(configRoot, "labui", "config.toml")
+	configPath := filepath.Join(configRoot, "labcoat", "config.toml")
 	conf, err := config.Load(configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to read config %q: %v\n", configPath, err)

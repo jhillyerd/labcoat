@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jhillyerd/labui/internal/npool"
+	"github.com/jhillyerd/labcoat/internal/npool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

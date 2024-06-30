@@ -18,8 +18,8 @@
           version = builtins.substring 0 8 self.lastModifiedDate;
         in
         {
-          packages.labui = pkgs.buildGoModule {
-            pname = "labui";
+          packages.labcoat = pkgs.buildGoModule {
+            pname = "labcoat";
             inherit version;
             src = ./.;
 
@@ -27,7 +27,7 @@
             vendorHash = "sha256-v7r7J3itAv72lx7zSkg6VfasfnokXT9H8oNhUuB02O4=";
           };
 
-          packages.default = self'.packages.labui;
+          packages.default = self'.packages.labcoat;
 
           devShells.default = pkgs.mkShell {
             buildInputs = with pkgs; [

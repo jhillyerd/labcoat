@@ -1,4 +1,4 @@
-module github.com/jhillyerd/labui
+module github.com/jhillyerd/labcoat
 
 go 1.22.1
 

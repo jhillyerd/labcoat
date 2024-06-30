@@ -1,10 +1,10 @@
-# labui
+# labcoat
 
-labui is a TUI for deploying flake based [NixOS] systems.  It lets you select
+labcoat is a TUI for deploying flake based [NixOS] systems.  It lets you select
 from a list of `nixosConfigurations` available in your flake, giving you one
 touch access to deploy and inspect those systems.
 
-labui is ideal for managing NixOS lab environments up to a couple dozen
+labcoat is ideal for managing NixOS lab environments up to a couple dozen
 systems; particularly during the development phase where you do not yet
 know if your configuration works correctly.
 
@@ -31,7 +31,7 @@ you will be better served by a parallel deployment tool such as [Colmena].
 
 ## Status
 
-labui is currently incomplete, and alpha quality.  However, it's good enough
+labcoat is currently incomplete, and alpha quality.  However, it's good enough
 to manage [my homelab], and maybe yours too.
 
 

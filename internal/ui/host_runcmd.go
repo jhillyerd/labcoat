@@ -6,7 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/jhillyerd/labui/internal/runner"
+	"github.com/jhillyerd/labcoat/internal/runner"
 )
 
 type hostRunCommandMsg struct {

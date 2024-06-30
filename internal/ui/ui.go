@@ -18,10 +18,10 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/jhillyerd/labui/internal/config"
-	"github.com/jhillyerd/labui/internal/nix"
-	"github.com/jhillyerd/labui/internal/npool"
-	"github.com/jhillyerd/labui/internal/runner"
+	"github.com/jhillyerd/labcoat/internal/config"
+	"github.com/jhillyerd/labcoat/internal/nix"
+	"github.com/jhillyerd/labcoat/internal/npool"
+	"github.com/jhillyerd/labcoat/internal/runner"
 )
 
 const (

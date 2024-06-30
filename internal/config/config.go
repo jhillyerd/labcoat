@@ -67,7 +67,7 @@ func PrintDefaults() error {
 		return err
 	}
 
-	fmt.Println("# labui default configuration, only needed if you wish to make changes.")
+	fmt.Println("# labcoat default configuration, only needed if you wish to make changes.")
 	fmt.Println()
 	_, err = os.Stdout.Write(b)
 	return err
