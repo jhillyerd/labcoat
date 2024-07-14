@@ -12,5 +12,5 @@ To add a new host to this configuration, you would:
 
 1. Add it's hardware-configuration.nix to the `hw` directory (if unique)
 2. Add it's configuration.nix to the `hosts` directory
-3. Add a new entry references the two configs above to [`catalog/nodes.nix`](
+3. Add a new entry referencing the two configs above to [`catalog/nodes.nix`](
    https://github.com/jhillyerd/labcoat/blob/main/examples/modular/catalog/nodes.nix)

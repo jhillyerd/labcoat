@@ -50,6 +50,10 @@ the last argument
 nix run github:jhillyerd/labcoat -- ~/myflake/
 ```
 
+For ideas on how to layout a system flake for labcoat, please see the
+[examples directory](https://github.com/jhillyerd/labcoat/tree/main/examples).
+
+
 ## Configuration
 
 labcoat contains a default configuration, and does not require a configuration
