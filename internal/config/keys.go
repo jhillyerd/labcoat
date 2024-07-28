@@ -18,6 +18,7 @@ type KeyMap struct {
 
 	// Commands.
 	Deploy           key.Binding
+	Help             key.Binding
 	Reboot           key.Binding
 	RunCommandPrompt key.Binding
 	SSHInto          key.Binding
@@ -25,15 +26,22 @@ type KeyMap struct {
 	Quit             key.Binding
 }
 
-// FullHelp implements help.KeyMap.
+// FullHelp displays a full-screen list of all key bindings.
 func (k KeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{k.Up, k.Down, k.Filter, k.Status, k.Quit}}
+	return [][]key.Binding{
+		{k.Up, k.Down, k.Left, k.Right, k.ScrollUp, k.ScrollDown, k.Filter},
+		{k.Status, k.Deploy, k.SSHInto, k.RunCommandPrompt, k.Reboot},
+		{k.Pager, k.Quit, k.Help},
+	}
 }
 
-// ShortHelp implements help.KeyMap.
+// ShortHelp displays one line of key bindings.
 func (k KeyMap) ShortHelp() []key.Binding {
 	return []key.Binding{
-		k.Up, k.Down, k.Filter, k.Status, k.Deploy, k.SSHInto, k.RunCommandPrompt, k.Reboot, k.Quit}
+		k.Up, k.Down, k.NextTab,
+		k.Status, k.Deploy, k.SSHInto, k.RunCommandPrompt, k.Reboot,
+		k.Help,
+	}
 }
 
 var DefaultKeyMap = KeyMap{
@@ -77,6 +85,10 @@ var DefaultKeyMap = KeyMap{
 	Deploy: key.NewBinding(
 		key.WithKeys("d"),
 		key.WithHelp("d", "deploy"),
+	),
+	Help: key.NewBinding(
+		key.WithKeys("?"),
+		key.WithHelp("?", "help"),
 	),
 	Reboot: key.NewBinding(
 		key.WithKeys("r"),

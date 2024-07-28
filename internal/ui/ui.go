@@ -26,6 +26,7 @@ import (
 
 const (
 	viewModeHosts = iota
+	viewModeText
 	viewModeError
 )
 
@@ -56,6 +57,7 @@ type Model struct {
 	spinner      spinner.Model
 	confirmation *confirmationMsg
 	textInput    *textInput
+	text         string
 	error        string
 	flashText    string
 	flashTimer   *time.Timer
@@ -207,6 +209,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+		if m.viewMode == viewModeText {
+			// Any key to continue.
+			m.viewMode = viewModeHosts
+			m.text = ""
+
+			return m, nil
+		}
+
 		if m.viewMode == viewModeError {
 			// Error display is modal, swallow all key press messages.
 			if msg.String() == "esc" {
@@ -307,6 +317,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.keys.SSHInto):
 			return m, m.startHostInteractiveSSH()
+
+		case key.Matches(msg, m.keys.Help):
+			m.viewMode = viewModeText
+			m.text = labelStyle.Render("Help") +
+				"\n\n" +
+				m.help.FullHelpView(m.keys.FullHelp())
+			return m, nil
 
 		case key.Matches(msg, m.keys.Quit):
 			return m, tea.Quit
@@ -709,10 +726,14 @@ func (m Model) View() string {
 			hintBar = m.textInput.model.View()
 
 		default:
-			hintBar = hintBarStyle.Render(m.help.View(m.keys))
+			hintBar = hintBarStyle.Render(m.help.ShortHelpView(m.keys.ShortHelp()))
 		}
 
 		return lipgloss.JoinHorizontal(lipgloss.Top, hosts, content) + "\n" + hintBar
+
+	case viewModeText:
+		return m.text + "\n\n" +
+			subtleStyle.Render("[Press any key to continue]")
 
 	case viewModeError:
 		return labelStyle.Render("Critical Error") +
