@@ -14,6 +14,7 @@ type KeyMap struct {
 	ScrollDown key.Binding
 	NextTab    key.Binding
 	Filter     key.Binding
+	Jump       key.Binding
 	Pager      key.Binding
 
 	// Commands.
@@ -29,7 +30,7 @@ type KeyMap struct {
 // FullHelp displays a full-screen list of all key bindings.
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down, k.Left, k.Right, k.ScrollUp, k.ScrollDown, k.Filter},
+		{k.Up, k.Down, k.Left, k.Right, k.ScrollUp, k.ScrollDown, k.Jump, k.Filter},
 		{k.Status, k.Deploy, k.SSHInto, k.RunCommandPrompt, k.Reboot},
 		{k.Pager, k.Quit, k.Help},
 	}
@@ -76,6 +77,10 @@ var DefaultKeyMap = KeyMap{
 	Filter: key.NewBinding(
 		key.WithKeys("/"),
 		key.WithHelp("/", "filter hosts"),
+	),
+	Jump: key.NewBinding(
+		key.WithKeys("f"),
+		key.WithHelp("f", "jump to letter"),
 	),
 	Pager: key.NewBinding(
 		key.WithKeys("p"),

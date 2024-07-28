@@ -55,6 +55,7 @@ type Model struct {
 	keys         config.KeyMap
 	help         help.Model
 	spinner      spinner.Model
+	jumpToLetter bool
 	confirmation *confirmationMsg
 	textInput    *textInput
 	text         string
@@ -232,6 +233,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 
+		if m.jumpToLetter {
+			m.jumpToLetter = false
+			letter := msg.String()
+
+			if len(letter) != 1 {
+				slog.Debug("Invalid jump letter keypress", "key", msg)
+				return m, func() tea.Msg {
+					return errorFlashMsg{
+						text: "Invalid jump letter key pressed",
+					}
+				}
+			}
+
+			m.hostList, cmd = m.hostList.Update(jumpToLetterMsg(letter))
+			return m, cmd
+		}
+
 		if m.confirmation != nil {
 			// Awaiting confirmation, `y` or `n` will trigger the corresponding cmd.
 			if msg.String() == "y" {
@@ -279,6 +297,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch {
+		case key.Matches(msg, m.keys.Jump):
+			m.jumpToLetter = true
+			return m, func() tea.Msg {
+				// Clear any flash message to ensure prompt visible.
+				return errorFlashMsg{}
+			}
+
 		case key.Matches(msg, m.keys.NextTab):
 			return m, m.handleNextTabKey()
 
@@ -721,6 +746,9 @@ func (m Model) View() string {
 
 		case m.confirmation != nil:
 			hintBar = confirmDialogStyle.Render(m.confirmation.text)
+
+		case m.jumpToLetter:
+			hintBar = confirmDialogStyle.Render("Jump to letter: ")
 
 		case m.textInput != nil:
 			hintBar = m.textInput.model.View()

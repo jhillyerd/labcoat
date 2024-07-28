@@ -16,6 +16,8 @@ type hostListModel struct {
 	prevItem list.Item // Used to detect when selected host changes for hover.
 }
 
+type jumpToLetterMsg string
+
 func newHostList(hosts []string) hostListModel {
 	items := make([]list.Item, 0, len(hosts))
 	for _, host := range hosts {
@@ -41,11 +43,35 @@ func (m hostListModel) Init() tea.Cmd {
 
 // Update implements tea.Model.
 func (m hostListModel) Update(msg tea.Msg) (hostListModel, tea.Cmd) {
-	var cmd tea.Cmd
+	var (
+		cmd  tea.Cmd
+		cmds []tea.Cmd
+	)
+
+	if msg, ok := msg.(jumpToLetterMsg); ok {
+		cmd = m.handleJumpToLetterMsg(msg)
+	}
+	cmds = append(cmds, cmd)
 
 	m.list, cmd = m.list.Update(msg)
+	cmds = append(cmds, cmd)
 
-	return m, tea.Batch(cmd, m.handleHostChange())
+	cmds = append(cmds, m.handleHostChange())
+
+	return m, tea.Batch(cmds...)
+}
+
+func (m *hostListModel) handleJumpToLetterMsg(msg jumpToLetterMsg) tea.Cmd {
+	letter := string(msg)
+
+	for i, h := range m.list.Items() {
+		if strings.HasPrefix(h.FilterValue(), letter) {
+			m.list.Select(i)
+			break
+		}
+	}
+
+	return nil
 }
 
 func (m *hostListModel) handleHostChange() tea.Cmd {
