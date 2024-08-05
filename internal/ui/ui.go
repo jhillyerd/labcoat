@@ -22,6 +22,7 @@ import (
 	"github.com/jhillyerd/labcoat/internal/nix"
 	"github.com/jhillyerd/labcoat/internal/npool"
 	"github.com/jhillyerd/labcoat/internal/runner"
+	"github.com/jhillyerd/labcoat/internal/store"
 )
 
 const (
@@ -41,6 +42,7 @@ var hostTabNames = []string{"Host Status", "Deploy", "Run Command"}
 type Model struct {
 	ctx          context.Context
 	program      *tea.Program
+	db           *store.BoltDB
 	config       config.Config
 	ready        bool // true once screen size is known.
 	viewMode     int  // Current UI mode.
@@ -104,7 +106,9 @@ type dim struct {
 	height int
 }
 
-func New(conf config.Config, keys config.KeyMap, flakePath string, hostNames []string) Model {
+func New(
+	conf config.Config, keys config.KeyMap, flakePath string, hostNames []string, db *store.BoltDB,
+) Model {
 	hostList := newHostList(hostNames)
 	hostList.list.KeyMap.CursorUp = keys.Up
 	hostList.list.KeyMap.CursorDown = keys.Down
@@ -127,6 +131,7 @@ func New(conf config.Config, keys config.KeyMap, flakePath string, hostNames []s
 	return Model{
 		ctx:       context.Background(),
 		config:    conf,
+		db:        db,
 		viewMode:  viewModeHosts,
 		flakePath: flakePath,
 		hostList:  hostList,
