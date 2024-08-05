@@ -17,7 +17,7 @@ import (
 const (
 	stateNotStarted = iota
 	stateRunning
-	stateDone
+	stateSuccess
 	stateFailed
 )
 
@@ -144,14 +144,21 @@ func (r *Model) Running() bool {
 func (r *Model) Complete() bool {
 	r.RLock()
 	defer r.RUnlock()
-	return r.state == stateDone || r.state == stateFailed
+	return r.state == stateSuccess || r.state == stateFailed
 }
 
 // Successful is true if done, not failed.
 func (r *Model) Successful() bool {
 	r.RLock()
 	defer r.RUnlock()
-	return r.state == stateDone
+	return r.state == stateSuccess
+}
+
+// Closed if complete and no more output allowed.
+func (r *Model) Closed() bool {
+	r.RLock()
+	defer r.RUnlock()
+	return r.closed
 }
 
 func (r *Model) waitForOutput() tea.Cmd {
@@ -165,7 +172,7 @@ func (r *Model) waitForOutput() tea.Cmd {
 
 			// Render status text and stop waiting for output.
 			r.closed = true
-			s := r.Styles.StatusSuffix.Render("\n[" + stateToString(r.state) + "]")
+			s := r.Styles.StatusSuffix.Render("\n[" + stateToString(r) + "]")
 			_, _ = r.output.Write([]byte(s))
 
 			return nil
@@ -185,11 +192,13 @@ func (r *Model) Init() tea.Cmd {
 
 		slog.Info("running", "cmd", r, "dest", r.dest)
 
-		r.err = r.cmd.Run()
+		// Run blocks until cmd is done running.
+		err := r.cmd.Run()
 
 		r.Lock()
-		if r.err == nil {
-			r.state = stateDone
+		r.err = err
+		if err == nil {
+			r.state = stateSuccess
 		} else {
 			r.state = stateFailed
 		}
@@ -265,20 +274,20 @@ func (r *Model) StateString() string {
 	r.RLock()
 	defer r.RUnlock()
 
-	return stateToString(r.state)
+	return stateToString(r)
 }
 
-func stateToString(state int) string {
-	switch state {
+func stateToString(r *Model) string {
+	switch r.state {
 	case stateNotStarted:
-		return "Not Started"
+		return "not started"
 	case stateRunning:
-		return "Running"
-	case stateDone:
-		return "Done"
+		return "running"
+	case stateSuccess:
+		return "success"
 	case stateFailed:
-		return "Failed"
+		return "failed: " + r.err.Error()
 	}
 
-	return "Unknown"
+	return "unknown"
 }

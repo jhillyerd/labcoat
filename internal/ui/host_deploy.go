@@ -77,7 +77,8 @@ func (m *Model) handleHostDeployMsg(msg hostDeployMsg) tea.Cmd {
 	host.deploy.intro = intro
 	host.deploy.contentPanel.SetContent(intro)
 
-	return srunner.Init()
+	logCmd := m.hostLogCmd(host, "NixOS deployment started")
+	return tea.Batch(srunner.Init(), logCmd)
 }
 
 func (m *Model) handleHostDeployOutputMsg(msg hostDeployOutputMsg) tea.Cmd {

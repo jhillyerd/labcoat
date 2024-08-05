@@ -22,6 +22,7 @@ import (
 	"github.com/jhillyerd/labcoat/internal/nix"
 	"github.com/jhillyerd/labcoat/internal/npool"
 	"github.com/jhillyerd/labcoat/internal/runner"
+	"github.com/jhillyerd/labcoat/internal/store"
 )
 
 const (
@@ -34,13 +35,15 @@ const (
 	hostTabStatus = iota
 	hostTabDeploy
 	hostTabRunCmd
+	hostTabLog
 )
 
-var hostTabNames = []string{"Host Status", "Deploy", "Run Command"}
+var hostTabNames = []string{"Host Status", "Deploy", "Run Command", "Op Log"}
 
 type Model struct {
 	ctx          context.Context
 	program      *tea.Program
+	db           *store.BoltDB
 	config       config.Config
 	ready        bool // true once screen size is known.
 	viewMode     int  // Current UI mode.
@@ -74,6 +77,9 @@ type hostModel struct {
 		runner       *runner.Model
 		cancel       func()
 	}
+	log struct {
+		contentPanel viewport.Model
+	}
 	runCmd struct {
 		intro        string // Rendered intro text: command, host, etc.
 		contentPanel viewport.Model
@@ -104,7 +110,9 @@ type dim struct {
 	height int
 }
 
-func New(conf config.Config, keys config.KeyMap, flakePath string, hostNames []string) Model {
+func New(
+	conf config.Config, keys config.KeyMap, flakePath string, hostNames []string, db *store.BoltDB,
+) Model {
 	hostList := newHostList(hostNames)
 	hostList.list.KeyMap.CursorUp = keys.Up
 	hostList.list.KeyMap.CursorDown = keys.Down
@@ -119,14 +127,16 @@ func New(conf config.Config, keys config.KeyMap, flakePath string, hostNames []s
 	hosts := make(map[string]*hostModel, len(hostNames))
 	for _, v := range hostNames {
 		hm := &hostModel{name: v}
-		hm.status.contentPanel = newContentPanel(keys)
+		hm.log.contentPanel = newContentPanel(keys)
 		hm.runCmd.contentPanel = newContentPanel(keys)
+		hm.status.contentPanel = newContentPanel(keys)
 		hosts[v] = hm
 	}
 
 	return Model{
 		ctx:       context.Background(),
 		config:    conf,
+		db:        db,
 		viewMode:  viewModeHosts,
 		flakePath: flakePath,
 		hostList:  hostList,
@@ -239,11 +249,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			if len(letter) != 1 {
 				slog.Debug("Invalid jump letter keypress", "key", msg)
-				return m, func() tea.Msg {
-					return errorFlashMsg{
-						text: "Invalid jump letter key pressed",
-					}
-				}
+				return m, errorFlashCmd("Invalid jump letter key pressed")
 			}
 
 			m.hostList, cmd = m.hostList.Update(jumpToLetterMsg(letter))
@@ -357,26 +363,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case hostChangedMsg:
 		return m, m.handleHostChangedMsg(msg)
 
-	case hostHoverMsg:
-		return m, m.handleHostHoverMsg(msg)
-
-	case hostTargetInfoMsg:
-		return m, m.handleHostTargetInfoMsg(msg)
-
-	case hostStatusMsg:
-		return m, m.handleHostStatusMsg(msg)
-
 	case hostDeployMsg:
 		return m, m.handleHostDeployMsg(msg)
 
 	case hostDeployOutputMsg:
 		return m, m.handleHostDeployOutputMsg(msg)
 
+	case hostHoverMsg:
+		return m, m.handleHostHoverMsg(msg)
+
+	case hostLogUpdatedMsg:
+		return m, m.handleHostLogUpdatedMsg(msg)
+
 	case hostRunCommandMsg:
 		return m, m.handleHostRunCommandMsg(msg)
 
 	case hostRunCommandOutputMsg:
 		return m, m.handleHostRunCommandOutputMsg(msg)
+
+	case hostStatusMsg:
+		return m, m.handleHostStatusMsg(msg)
+
+	case hostTargetInfoMsg:
+		return m, m.handleHostTargetInfoMsg(msg)
 
 	case openPagerMsg:
 		return m, m.handleOpenPagerMsg(msg)
@@ -433,39 +442,49 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) handleNextTabKey() tea.Cmd {
 	if m.selectedHost != nil {
-		m.setVisibleHostTab(m.selectedHost.hostTab + 1)
+		return m.setVisibleHostTab(m.selectedHost.hostTab + 1)
 	}
 
 	return nil
 }
 
-func (m *Model) setVisibleHostTab(hostTab int) {
+func (m *Model) setVisibleHostTab(hostTab int) tea.Cmd {
 	if m.selectedHost != nil {
 		m.selectedHost.hostTab = hostTab % len(hostTabNames)
-		m.updateContentPanel()
+		return m.updateContentPanel()
 	}
+
+	return nil
 }
 
 // Updates the main contentPanel viewport for current host & tab.
 // Multiple viewports are used to maintain scroll position when switching.
-func (m *Model) updateContentPanel() {
+func (m *Model) updateContentPanel() tea.Cmd {
+	var cmd tea.Cmd
+
 	if m.selectedHost != nil {
 		switch m.selectedHost.hostTab {
-		case hostTabStatus:
-			m.contentPanel = &m.selectedHost.status.contentPanel
+		case hostTabLog:
+			m.contentPanel = &m.selectedHost.log.contentPanel
+			// Force log content update.
+			cmd = func() tea.Msg { return hostLogUpdatedMsg{m.selectedHost} }
 		case hostTabDeploy:
 			m.contentPanel = &m.selectedHost.deploy.contentPanel
 		case hostTabRunCmd:
 			m.contentPanel = &m.selectedHost.runCmd.contentPanel
+		case hostTabStatus:
+			m.contentPanel = &m.selectedHost.status.contentPanel
 		default:
 			slog.Error("Unknown host tab index (bug)", "index", m.selectedHost.hostTab)
-			return
+			return nil
 		}
 
 		m.contentPanel.Width = m.sizes.contentPanel.width
 		m.contentPanel.Height = m.sizes.contentPanel.height
 		m.ready = true
 	}
+
+	return cmd
 }
 
 func (m *Model) handleHostChangedMsg(msg hostChangedMsg) tea.Cmd {
@@ -569,7 +588,7 @@ func (m *Model) handleOpenPagerMsg(_ openPagerMsg) tea.Cmd {
 	f, err := os.CreateTemp("", "*.txt")
 	if err != nil {
 		slog.Error("Failed to create temp file", "err", err)
-		return func() tea.Msg { return errorFlashMsg{text: "Pager: " + err.Error()} }
+		return errorFlashCmd("Pager: %s", err)
 	}
 
 	var withErr error
@@ -583,13 +602,13 @@ func (m *Model) handleOpenPagerMsg(_ openPagerMsg) tea.Cmd {
 
 	})
 	if withErr != nil {
-		return func() tea.Msg { return errorFlashMsg{text: "Pager: " + withErr.Error()} }
+		return errorFlashCmd("Pager: %s", withErr)
 	}
 
 	fname := f.Name()
 	if err := f.Close(); err != nil {
 		slog.Error("Failed to close temp file", "err", err)
-		return func() tea.Msg { return errorFlashMsg{text: "Pager: " + err.Error()} }
+		return errorFlashCmd("Pager: %s", err)
 	}
 
 	// TODO handle pager arguments.
@@ -811,17 +830,14 @@ func calculateSizes(win tea.WindowSizeMsg) layoutSizes {
 	return s
 }
 
+// Confirms we have nix info for the specified host.
 func requireHostTarget(logName string, host *hostModel) (bool, tea.Cmd) {
 	if host == nil {
 		slog.Error(logName + " called with nil host (bug)")
 		return false, nil
 	}
 	if host.target == nil {
-		return false, func() tea.Msg {
-			return errorFlashMsg{
-				text: fmt.Sprintf("Target info for host %q not yet available", host.name),
-			}
-		}
+		return false, errorFlashCmd("Target info for host %q not yet available", host.name)
 	}
 
 	return true, nil
@@ -841,6 +857,16 @@ func (m *Model) withVisibleRunner(fn func(*runner.Model)) {
 
 	if runner != nil {
 		fn(runner)
+	}
+}
+
+func errorFlashCmd(format string, a ...any) tea.Cmd {
+	text := fmt.Sprintf(format, a...)
+
+	return func() tea.Msg {
+		return errorFlashMsg{
+			text: text,
+		}
 	}
 }
 
