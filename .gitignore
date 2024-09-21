@@ -24,3 +24,5 @@ go.work
 .direnv
 debug.log
 result
+/examples/vagrant-demo/.vagrant
+/labcoat
