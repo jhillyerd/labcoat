@@ -531,6 +531,7 @@ func (m *Model) hostTargetInfoCmd(host *hostModel) tea.Cmd {
 		targetInfo, nerr := nix.GetTargetInfo(nix.TargetInfoRequest{
 			FlakePath: m.flakePath,
 			HostName:  host.name,
+			Config:    m.config,
 		})
 		if nerr != nil {
 			slog.Error("Failed to fetch target info from nix",

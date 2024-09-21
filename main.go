@@ -33,6 +33,22 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Init logging.
+	if *logPath != "" {
+		lf, err := tea.LogToFile(*logPath, "")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "logging error: ", err)
+			os.Exit(1)
+		}
+		defer lf.Close()
+
+		slog.SetLogLoggerLevel(slog.LevelDebug)
+		slog.Info("### STARTUP ###################################################################")
+	} else {
+		// Prevent log output corrupting UI.
+		log.SetOutput(io.Discard)
+	}
+
 	// Load config file if present.
 	configRoot := os.Getenv("XDG_CONFIG_HOME")
 	if configRoot == "" {
@@ -49,22 +65,6 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to read config %q: %v\n", configPath, err)
 		os.Exit(1)
-	}
-
-	// Init logging.
-	if *logPath != "" {
-		lf, err := tea.LogToFile(*logPath, "")
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "logging error: ", err)
-			os.Exit(1)
-		}
-		defer lf.Close()
-
-		slog.SetLogLoggerLevel(slog.LevelDebug)
-		slog.Info("### STARTUP ###################################################################")
-	} else {
-		// Prevent log output corrupting UI.
-		log.SetOutput(io.Discard)
 	}
 
 	// Load host list from flake.

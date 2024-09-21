@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os/exec"
 	"text/template"
+
+	"github.com/jhillyerd/labcoat/internal/config"
 )
 
 const namesScript = `
@@ -43,7 +46,7 @@ const targetInfoScript = `
 		target = flake.nixosConfigurations.${key};
 	in
 	{
-		deployHost = target.config.networking.fqdnOrHostName;
+		deployHost = {{ .Config.Hosts.DeployHostAttr }};
 	}
 `
 
@@ -52,6 +55,7 @@ var targetInfoTmpl = template.Must(template.New("targetInfo").Parse(targetInfoSc
 type TargetInfoRequest struct {
 	FlakePath string
 	HostName  string
+	Config    config.Config
 }
 
 // TargetInfo contains host information queried from nix.  It is cached.
@@ -96,6 +100,7 @@ func runScript(tmpl *template.Template, data any) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("nix template read: %w", err)
 	}
+	slog.Debug("Running nix script", "script", script)
 
 	// Pass script to nix cmd.
 	cmd := exec.Command("nix", "eval", "--file", "-", "--json")
