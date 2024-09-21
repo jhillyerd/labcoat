@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/pelletier/go-toml/v2"
@@ -80,7 +81,7 @@ func Load(path string) (*Config, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			// Use defaults when no config file present.
+			slog.Warn("Config file not found, using defaults", "path", path)
 			return &conf, nil
 		}
 		return nil, err
@@ -90,5 +91,6 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
+	slog.Debug("Loaded config", "path", path)
 	return &conf, nil
 }
