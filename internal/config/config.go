@@ -75,12 +75,16 @@ func PrintDefaults() error {
 }
 
 // Load and parse config, overlaying `Default` values.
-func Load(path string) (*Config, error) {
+func Load(path string, mustExist bool) (*Config, error) {
 	conf := Default()
 
 	b, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			if mustExist {
+				return nil, err
+			}
+
 			slog.Warn("Config file not found, using defaults", "path", path)
 			return &conf, nil
 		}
