@@ -59,6 +59,25 @@
               (networkModule { hostName = "web-lab"; ipAddr = "192.168.33.11"; })
             ];
           };
+
+          # Fake systems to pad the labcoat host list.
+          fake-host-1 = lib.nixosSystem {
+            system = "x86_64-linux";
+            modules = [
+              commonModule
+              ./hardware-configuration.nix
+              (networkModule { hostName = "fake-host-1"; ipAddr = "192.168.33.11"; })
+            ];
+          };
+
+          fake-host-2 = lib.nixosSystem {
+            system = "x86_64-linux";
+            modules = [
+              commonModule
+              ./hardware-configuration.nix
+              (networkModule { hostName = "fake-host-2"; ipAddr = "192.168.33.10"; })
+            ];
+          };
         };
     };
 }

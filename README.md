@@ -11,6 +11,8 @@ know if your configuration works correctly.
 For production NixOS environments with many instances of the same configuration,
 you will be better served by a parallel deployment tool such as [Colmena].
 
+![Demo Screencast](/examples/vagrant-demo/demo.gif)
+
 
 ## Features
 

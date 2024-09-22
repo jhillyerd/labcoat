@@ -12,7 +12,7 @@
     flake-parts.lib.mkFlake { inherit inputs; } {
       systems = [ "x86_64-linux" "aarch64-linux" ];
 
-      perSystem = { config, self', inputs', pkgs, system, ... }:
+      perSystem = { self', pkgs, ... }:
         let
           # Generate a user-friendly version number.
           version = builtins.substring 0 8 self.lastModifiedDate;
@@ -37,6 +37,7 @@
               go_1_22
               golint
               gopls
+              vhs
             ];
 
             hardeningDisable = [ "fortify" ];

@@ -1,3 +1,0 @@
-# Host deployment configuration. Nix attrs typically start with 'flake' or 'target'.
-[hosts]
-deploy-host-attr = 'target._module.args.deployAddr'

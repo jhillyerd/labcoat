@@ -22,7 +22,9 @@
 go.work
 
 .direnv
+.vagrant
 debug.log
 result
-/examples/vagrant-demo/.vagrant
 /labcoat
+/examples/vagrant-demo/labcoat
+/examples/vagrant-demo/*.mp4
