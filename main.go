@@ -17,9 +17,10 @@ import (
 
 func main() {
 	var (
-		help     = flag.Bool("help", false, "Print argument help message")
-		defaults = flag.Bool("defaults", false, "Prints default configuration to stdout and exits")
-		logPath  = flag.String("log", "", "File to write debug logs to")
+		help          = flag.Bool("help", false, "Print argument help message")
+		configPathOpt = flag.String("config", "", "Path to TOML config file")
+		defaults      = flag.Bool("defaults", false, "Prints default configuration to stdout and exits")
+		logPath       = flag.String("log", "", "File to write debug logs to")
 	)
 	flag.Parse()
 
@@ -50,20 +51,19 @@ func main() {
 	}
 
 	// Load config file if present.
-	configRoot := os.Getenv("XDG_CONFIG_HOME")
-	if configRoot == "" {
-		home := os.Getenv("HOME")
-		if home == "" {
-			fmt.Fprintln(os.Stderr, "Neither $XDG_CONFIG_HOME or $HOME available")
-			os.Exit(1)
-		}
-		configRoot = filepath.Join(home, ".config")
+	var configPath string
+	var configMustExist bool
+
+	if *configPathOpt == "" {
+		configPath = defaultConfigPath()
+	} else {
+		configPath = *configPathOpt
+		configMustExist = true
 	}
 
-	configPath := filepath.Join(configRoot, "labcoat", "config.toml")
-	conf, err := config.Load(configPath)
+	conf, err := config.Load(configPath, configMustExist)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to read config %q: %v\n", configPath, err)
+		fmt.Fprintf(os.Stderr, "Failed to read config: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -96,4 +96,18 @@ func main() {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
+}
+
+func defaultConfigPath() string {
+	configRoot := os.Getenv("XDG_CONFIG_HOME")
+	if configRoot == "" {
+		home := os.Getenv("HOME")
+		if home == "" {
+			fmt.Fprintln(os.Stderr, "Neither $XDG_CONFIG_HOME or $HOME available")
+			os.Exit(1)
+		}
+		configRoot = filepath.Join(home, ".config")
+	}
+
+	return filepath.Join(configRoot, "labcoat", "config.toml")
 }
