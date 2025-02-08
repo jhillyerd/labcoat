@@ -24,7 +24,7 @@
             src = ./.;
 
             # Must be updated if go.mod changes.
-            vendorHash = "sha256-CrVFWXqTZFYtZJio7aI2vTi5yXgPy+b/4UqCS1gl9A8=";
+            vendorHash = "sha256-uCHo4nTyEpBmkbLUWfufX5ceAbOLwzjWOJFZQGwveuU=";
 
             meta.mainProgram = "labcoat";
           };
