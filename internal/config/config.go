@@ -43,11 +43,10 @@ func Default() Config {
 		},
 		Commands: Commands{
 			StatusCmds: []string{
-				"date",
-				"systemctl --failed",
-				"nixos-rebuild --no-build-nix list-generations",
-				"uname -a",
 				"uptime",
+				"uname -a",
+				"nixos-rebuild --no-build-nix list-generations",
+				"systemctl --failed",
 				"df -h -x tmpfs -x overlay",
 			},
 		},
