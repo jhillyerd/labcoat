@@ -24,7 +24,7 @@
             src = ./.;
 
             # Must be updated if go.mod changes.
-            vendorHash = "sha256-uCHo4nTyEpBmkbLUWfufX5ceAbOLwzjWOJFZQGwveuU=";
+            vendorHash = "sha256-PkB3IRiytsAlGIX2mUPqirgc1HVsztAkaHbEhrFZe0k=";
 
             meta.mainProgram = "labcoat";
           };
@@ -34,7 +34,7 @@
           devShells.default = pkgs.mkShell {
             buildInputs = with pkgs; [
               delve
-              go_1_22
+              go_1_23
               golint
               gopls
               vhs
