@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -46,12 +47,8 @@ func (m *Model) handleHostDeployMsg(msg hostDeployMsg) tea.Cmd {
 	}
 
 	// Construct nixos-rebuild command line.
-	args := []string{
-		"--flake",
-		".#" + host.name,
-		"--target-host",
-		host.target.DeployUser + "@" + host.target.DeployHost,
-	}
+	targetHost := host.target.DeployUser + "@" + host.target.DeployHost
+	args := []string{"--flake", ".#" + host.name, "--target-host", targetHost}
 	if m.config.Nix.DefaultBuildHost != "" {
 		args = append(args, "--build-host", m.config.Nix.DefaultBuildHost)
 	}
@@ -77,19 +74,27 @@ func (m *Model) handleHostDeployMsg(msg hostDeployMsg) tea.Cmd {
 	host.deploy.intro = intro
 	host.deploy.contentPanel.SetContent(intro)
 
-	logCmd := m.hostLogCmd(host, "NixOS deployment started")
+	logCmd := m.hostLogCmd(host, fmt.Sprintf("NixOS deployment started, target: %s", targetHost))
 	return tea.Batch(srunner.Init(), logCmd)
 }
 
 func (m *Model) handleHostDeployOutputMsg(msg hostDeployOutputMsg) tea.Cmd {
+	var cmd tea.Cmd
+
 	host := msg.host
-	if host.deploy.runner == nil {
+	srunner := host.deploy.runner
+	if srunner == nil {
 		slog.Error("Received hostDeployOutputMsg for host with no runner (bug)", "host", host.name)
 		return nil
 	}
 
-	srunner := host.deploy.runner
-	_, cmd := srunner.Update(nil)
+	if msg.final {
+		// Log completion.
+		cmd = m.hostLogCmd(msg.host, fmt.Sprintf("NixOS deployment finished: %s", srunner.StateString()))
+	} else {
+		// Schedule next update.
+		_, cmd = srunner.Update(nil)
+	}
 
 	// Render and cache output content.
 	panel := &host.deploy.contentPanel

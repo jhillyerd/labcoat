@@ -46,8 +46,9 @@ func (m *Model) handleHostLogUpdatedMsg(msg hostLogUpdatedMsg) tea.Cmd {
 		slog.Error("Failed to read operation log", "err", err, "host", hostName)
 		return nil
 	}
+
 	if len(entries) == 0 {
-		m.contentPanel.SetContent("No log entries for " + hostName)
+		m.contentPanel.SetContent("No operation log entries for " + hostName)
 		return nil
 	}
 
