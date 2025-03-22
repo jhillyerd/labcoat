@@ -140,13 +140,6 @@ func (r *Model) Running() bool {
 	return r.state == stateNotStarted || r.state == stateRunning
 }
 
-// Complete is true if in done or failed state.
-func (r *Model) Complete() bool {
-	r.RLock()
-	defer r.RUnlock()
-	return r.state == stateSuccess || r.state == stateFailed
-}
-
 // Successful is true if done, not failed.
 func (r *Model) Successful() bool {
 	r.RLock()
@@ -163,7 +156,11 @@ func (r *Model) Closed() bool {
 
 func (r *Model) waitForOutput() tea.Cmd {
 	return func() tea.Msg {
-		if r.Complete() {
+		r.RLock()
+		complete := r.state == stateSuccess || r.state == stateFailed
+		r.RUnlock()
+
+		if complete {
 			r.Lock()
 			defer r.Unlock()
 			if r.closed {

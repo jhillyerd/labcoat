@@ -30,7 +30,7 @@ func (m *Model) hostStatusCmd(host *hostModel) tea.Cmd {
 
 	onUpdate := func(r *runner.Model) tea.Msg {
 		// Sent when the runner has new output to display.
-		return hostStatusMsg{hostName: host.name, final: r.Complete()}
+		return hostStatusMsg{hostName: host.name, final: r.Closed()}
 	}
 
 	script := runner.NewScript(m.config.Commands.StatusCmds)

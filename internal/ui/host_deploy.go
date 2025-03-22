@@ -42,7 +42,7 @@ func (m *Model) handleHostDeployMsg(msg hostDeployMsg) tea.Cmd {
 	}
 
 	onUpdate := func(r *runner.Model) tea.Msg {
-		return hostDeployOutputMsg{host: host, final: r.Complete()}
+		return hostDeployOutputMsg{host: host, final: r.Closed()}
 	}
 
 	// Construct nixos-rebuild command line.
