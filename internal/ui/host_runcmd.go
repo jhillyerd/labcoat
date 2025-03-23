@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -45,7 +46,7 @@ func (m *Model) handleHostRunCommandMsg(msg hostRunCommandMsg) tea.Cmd {
 	}
 
 	onUpdate := func(r *runner.Model) tea.Msg {
-		return hostRunCommandOutputMsg{host: host, final: r.Complete()}
+		return hostRunCommandOutputMsg{host: host, final: r.Closed()}
 	}
 
 	srunner := runner.NewRemote(m.ctx, onUpdate,
@@ -65,14 +66,22 @@ func (m *Model) handleHostRunCommandMsg(msg hostRunCommandMsg) tea.Cmd {
 }
 
 func (m *Model) handleHostRunCommandOutputMsg(msg hostRunCommandOutputMsg) tea.Cmd {
+	var cmd tea.Cmd
+
 	host := msg.host
-	if host.runCmd.runner == nil {
+	srunner := host.runCmd.runner
+	if srunner == nil {
 		slog.Error("Received hostCmdOutput for host with no runner (bug)", "host", host.name)
 		return nil
 	}
 
-	srunner := host.runCmd.runner
-	_, cmd := srunner.Update(nil)
+	if msg.final {
+		// Log completion.
+		cmd = m.hostLogCmd(msg.host, fmt.Sprintf("Ran `%s`: %s", srunner, srunner.StateString()))
+	} else {
+		// Schedule next update.
+		_, cmd = srunner.Update(nil)
+	}
 
 	// Render and cache output content.
 	output := host.runCmd.intro

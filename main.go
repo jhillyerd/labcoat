@@ -12,7 +12,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jhillyerd/labcoat/internal/config"
 	"github.com/jhillyerd/labcoat/internal/nix"
+	"github.com/jhillyerd/labcoat/internal/store"
 	"github.com/jhillyerd/labcoat/internal/ui"
+	bolt "go.etcd.io/bbolt"
 )
 
 func main() {
@@ -67,6 +69,27 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Open database.
+	dbPath := defaultDatabasePath()
+	dbDir := filepath.Dir(dbPath)
+	if _, err := os.Stat(dbPath); err != nil {
+		if err := os.MkdirAll(dbDir, 0700); err != nil {
+			fmt.Fprintln(os.Stderr, err.Error())
+			os.Exit(1)
+		}
+	}
+	db, err := bolt.Open(dbPath, 0600, nil)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
+	defer db.Close()
+	dbs, err := store.NewBoltDB(db)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
+
 	// Load host list from flake.
 	flakePath := flag.Arg(0)
 	if flakePath == "" {
@@ -90,7 +113,7 @@ func main() {
 	}
 
 	// Launch UI.
-	p := tea.NewProgram(ui.New(*conf, config.DefaultKeyMap, flakePath, hosts), tea.WithAltScreen())
+	p := tea.NewProgram(ui.New(*conf, config.DefaultKeyMap, flakePath, hosts, dbs), tea.WithAltScreen())
 	go p.Send(p)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
@@ -110,4 +133,18 @@ func defaultConfigPath() string {
 	}
 
 	return filepath.Join(configRoot, "labcoat", "config.toml")
+}
+
+func defaultDatabasePath() string {
+	configRoot := os.Getenv("XDG_STATE_HOME")
+	if configRoot == "" {
+		home := os.Getenv("HOME")
+		if home == "" {
+			fmt.Fprintln(os.Stderr, "Neither $XDG_STATE_HOME or $HOME available")
+			os.Exit(1)
+		}
+		configRoot = filepath.Join(home, ".local", "state")
+	}
+
+	return filepath.Join(configRoot, "labcoat", "db_v1.bolt")
 }

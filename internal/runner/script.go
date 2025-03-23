@@ -22,6 +22,7 @@ func escape(cmd string) string {
 	return strings.ReplaceAll(cmd, "\"", "\\\"")
 }
 
+// FormatOutput detects label (header) blocks and formats them with labelFn.
 func FormatOutput(s string, labelFn func(string) string) string {
 	var out string
 
