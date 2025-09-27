@@ -34,7 +34,7 @@
           devShells.default = pkgs.mkShell {
             buildInputs = with pkgs; [
               delve
-              go_1_23
+              go
               golint
               gopls
               vhs
