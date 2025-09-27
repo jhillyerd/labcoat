@@ -27,6 +27,7 @@ func main() {
 	flag.Parse()
 
 	if *help {
+		fmt.Println("Usage: labcoat [options] [flake-dir]")
 		flag.PrintDefaults()
 		os.Exit(0)
 	}
@@ -99,6 +100,14 @@ func main() {
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
+	if fi, err := os.Stat(flakePath); err != nil || !fi.IsDir() {
+		fmt.Fprintf(os.Stderr, "flake-path %q must be a directory\n", flakePath)
+		os.Exit(1)
+	}
+	if _, err := os.Stat(filepath.Join(flakePath, "flake.nix")); err != nil {
+		fmt.Fprintf(os.Stderr, "flake-path directory %q must contain flake.nix\n", flakePath)
 		os.Exit(1)
 	}
 
