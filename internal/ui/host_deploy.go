@@ -70,11 +70,12 @@ func (m *Model) handleHostDeployMsg(msg hostDeployMsg) tea.Cmd {
 	host.deploy.contentPanel.SetContent(intro)
 
 	logCmd := m.hostLogCmd(host, fmt.Sprintf("NixOS deployment started, target: %s", targetHost))
-	return tea.Batch(srunner.Init(), logCmd)
+	busyCmd := hostListIncrBusyCmd(host.name)
+	return tea.Batch(srunner.Init(), logCmd, busyCmd)
 }
 
 func (m *Model) handleHostDeployOutputMsg(msg hostDeployOutputMsg) tea.Cmd {
-	var cmd tea.Cmd
+	var cmds []tea.Cmd
 
 	host := msg.host
 	srunner := host.deploy.runner
@@ -85,10 +86,13 @@ func (m *Model) handleHostDeployOutputMsg(msg hostDeployOutputMsg) tea.Cmd {
 
 	if msg.final {
 		// Log completion.
-		cmd = m.hostLogCmd(msg.host, fmt.Sprintf("NixOS deployment finished: %s", srunner.StateString()))
+		logCmd := m.hostLogCmd(msg.host, fmt.Sprintf("NixOS deployment finished: %s", srunner.StateString()))
+		busyCmd := hostListDecrBusyCmd(host.name)
+		cmds = append(cmds, logCmd, busyCmd)
 	} else {
 		// Schedule next update.
-		_, cmd = srunner.Update(nil)
+		_, updateCmd := srunner.Update(nil)
+		cmds = append(cmds, updateCmd)
 	}
 
 	// Render and cache output content.
@@ -112,5 +116,5 @@ func (m *Model) handleHostDeployOutputMsg(msg hostDeployOutputMsg) tea.Cmd {
 		panel.GotoBottom()
 	}
 
-	return cmd
+	return tea.Batch(cmds...)
 }

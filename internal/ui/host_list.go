@@ -3,9 +3,11 @@ package ui
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -14,6 +16,7 @@ import (
 type hostListModel struct {
 	list     list.Model
 	prevItem list.Item // Used to detect when selected host changes for hover.
+	spinner  *spinner.Model
 }
 
 type jumpToLetterMsg string
@@ -21,10 +24,19 @@ type jumpToLetterMsg string
 func newHostList(hosts []string) hostListModel {
 	items := make([]list.Item, 0, len(hosts))
 	for _, host := range hosts {
-		items = append(items, hostItem(host))
+		items = append(items, hostItem{
+			name:      host,
+			busyCount: 0,
+		})
 	}
 
-	hl := list.New(items, newItemDelegate(10), 10, 10)
+	// Shared spinner for all list items, as the itemDelegate is not visible/writable from its
+	// own Update() method.
+	spin := spinner.New()
+	spin.Spinner = spinner.MiniDot
+	spin.Style = spinnerStyle
+
+	hl := list.New(items, newItemDelegate(&spin, 10), 10, 10)
 	hl.Title = "Hosts"
 	hl.DisableQuitKeybindings()
 	hl.SetShowHelp(false)
@@ -32,13 +44,16 @@ func newHostList(hosts []string) hostListModel {
 	hl.Styles.TitleBar.Padding(0)
 	hl.Styles.StatusBar.Padding(0, 0, 1, 0)
 
-	return hostListModel{list: hl}
+	return hostListModel{
+		list:    hl,
+		spinner: &spin,
+	}
 }
 
 // Init implements tea.Model.
 func (m hostListModel) Init() tea.Cmd {
 	// TODO causes dup hostChangedMsgs due to `m` being read-only in Init.
-	return m.handleHostChange()
+	return tea.Batch(m.handleHostChange(), m.spinner.Tick)
 }
 
 // Update implements tea.Model.
@@ -48,17 +63,42 @@ func (m hostListModel) Update(msg tea.Msg) (hostListModel, tea.Cmd) {
 		cmds []tea.Cmd
 	)
 
-	if msg, ok := msg.(jumpToLetterMsg); ok {
+	switch msg := msg.(type) {
+	case hostListIncrBusyMsg:
+		cmd = m.handleHostListBusyMsg(msg.hostName, 1)
+		cmds = append(cmds, cmd)
+	case hostListDecrBusyMsg:
+		cmd = m.handleHostListBusyMsg(msg.hostName, -1)
+		cmds = append(cmds, cmd)
+	case jumpToLetterMsg:
 		cmd = m.handleJumpToLetterMsg(msg)
+		cmds = append(cmds, cmd)
+	case spinner.TickMsg:
+		*m.spinner, cmd = m.spinner.Update(msg)
+		cmds = append(cmds, cmd)
+	default:
+		m.list, cmd = m.list.Update(msg)
+		cmds = append(cmds, cmd)
 	}
-	cmds = append(cmds, cmd)
-
-	m.list, cmd = m.list.Update(msg)
-	cmds = append(cmds, cmd)
 
 	cmds = append(cmds, m.handleHostChange())
 
 	return m, tea.Batch(cmds...)
+}
+
+func (m *hostListModel) handleHostListBusyMsg(hostName string, delta int) tea.Cmd {
+	for i, h := range m.list.Items() {
+		if h.(hostItem).name == hostName {
+			item := h.(hostItem)
+			item.busyCount = max(0, item.busyCount+delta)
+			slog.Debug("hostListBusyMsg update", "host", hostName, "busyCount", item.busyCount)
+
+			m.list.SetItem(i, item)
+			return nil
+		}
+	}
+
+	return nil
 }
 
 func (m *hostListModel) handleJumpToLetterMsg(msg jumpToLetterMsg) tea.Cmd {
@@ -78,10 +118,15 @@ func (m *hostListModel) handleHostChange() tea.Cmd {
 	selected := m.list.SelectedItem()
 	if selected != nil && selected != m.prevItem {
 		m.prevItem = selected
-		host := string(selected.(hostItem))
+
+		host, ok := selected.(hostItem)
+		if !ok {
+			slog.Error("Selected item is not a hostItem (bug)")
+			return nil
+		}
 
 		return func() tea.Msg {
-			return hostChangedMsg{hostName: host}
+			return hostChangedMsg{hostName: host.name}
 		}
 	}
 
@@ -96,7 +141,7 @@ func (m hostListModel) View() string {
 // SetSize controls the size of list rendering.
 func (m *hostListModel) SetSize(width, height int) {
 	m.list.SetSize(width, height)
-	m.list.SetDelegate(newItemDelegate(width))
+	m.list.SetDelegate(newItemDelegate(m.spinner, width))
 	m.list.Styles.StatusBar.Width(width)
 }
 
@@ -106,22 +151,27 @@ func (m *hostListModel) FilterState() list.FilterState {
 }
 
 // hostItem represents an entry in the host list.
-type hostItem string
+type hostItem struct {
+	name      string
+	busyCount int // Number of active jobs for this host.
+}
 
-func (item hostItem) FilterValue() string { return string(item) }
-func (item hostItem) String() string      { return string(item) }
+func (item hostItem) FilterValue() string { return string(item.name) }
+func (item hostItem) String() string      { return string(item.name) }
 
 type itemDelegate struct {
+	spinner           *spinner.Model // Shared spinner for all items, updates handled by hostListModel.
 	itemStyle         lipgloss.Style
 	selectedItemStyle lipgloss.Style
 	maxWidth          int
 }
 
-func newItemDelegate(maxWidth int) itemDelegate {
-	itemStyle := lipgloss.NewStyle().PaddingLeft(1)
-	selectedItemStyle := itemStyle.PaddingLeft(0).Foreground(lipgloss.Color("170"))
+func newItemDelegate(spinner *spinner.Model, maxWidth int) itemDelegate {
+	itemStyle := lipgloss.NewStyle()
+	selectedItemStyle := itemStyle.Foreground(highlightColor)
 
 	return itemDelegate{
+		spinner:           spinner,
 		itemStyle:         itemStyle,
 		selectedItemStyle: selectedItemStyle,
 		maxWidth:          maxWidth,
@@ -136,15 +186,44 @@ func (d itemDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
 func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
 	item, ok := listItem.(hostItem)
 	if !ok {
+		slog.Error("Rendered listItem is not a hostItem (bug)")
 		return
 	}
 
-	fn := d.itemStyle.MaxWidth(d.maxWidth).Render
-	if index == m.Index() {
-		fn = func(s ...string) string {
-			return d.selectedItemStyle.MaxWidth(d.maxWidth).Render("»" + strings.Join(s, " "))
-		}
+	// Setup list decorations.
+	style := d.itemStyle
+
+	status := " "
+	if item.busyCount > 0 {
+		status = d.spinner.View()
 	}
 
-	fmt.Fprint(w, fn(string(item)))
+	selected := " "
+	if index == m.Index() {
+		style = d.selectedItemStyle
+		selected = "»"
+	}
+
+	line := status + style.Render(selected+item.name)
+	fmt.Fprint(w, d.itemStyle.MaxWidth(d.maxWidth).Render(line))
+}
+
+type hostListIncrBusyMsg struct {
+	hostName string
+}
+
+func hostListIncrBusyCmd(hostName string) tea.Cmd {
+	return func() tea.Msg {
+		return hostListIncrBusyMsg{hostName: hostName}
+	}
+}
+
+type hostListDecrBusyMsg struct {
+	hostName string
+}
+
+func hostListDecrBusyCmd(hostName string) tea.Cmd {
+	return func() tea.Msg {
+		return hostListDecrBusyMsg{hostName: hostName}
+	}
 }

@@ -673,17 +673,16 @@ func (m *Model) startHostInteractiveSSH() tea.Cmd {
 }
 
 var (
-	errorColor   = lipgloss.Color("172")
-	subtleColor  = lipgloss.Color("241")
-	confirmColor = lipgloss.Color("220")
-	labelFgColor = lipgloss.Color("230")
-	labelBgColor = lipgloss.Color("62")
+	errorColor     = lipgloss.Color("172")
+	subtleColor    = lipgloss.Color("241")
+	confirmColor   = lipgloss.Color("220")
+	highlightColor = lipgloss.Color("170")
+	labelFgColor   = lipgloss.Color("230")
+	labelBgColor   = lipgloss.Color("62")
 
 	subtleStyle = lipgloss.NewStyle().Foreground(subtleColor)
 	labelStyle  = lipgloss.NewStyle().MarginTop(1).Padding(0, 1).
 			Foreground(labelFgColor).Background(labelBgColor)
-	hostListStyle      = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Padding(0, 1)
-	tabSuffixStyle     = lipgloss.NewStyle().Border(tabSuffixBorder(), true).Padding(0, 1)
 	contentFooterStyle = lipgloss.NewStyle().Reverse(true).Padding(0, 1)
 	contentPanelStyle  = lipgloss.NewStyle().
 				Border(lipgloss.NormalBorder(), false, true, true, true).Padding(0, 1)
@@ -691,11 +690,14 @@ var (
 	errorFlashStyle    = hintBarStyle.Foreground(errorColor)
 	confirmDialogStyle = hintBarStyle.Foreground(confirmColor)
 
+	hostListStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), true).Padding(0, 1)
+	spinnerStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#80c080"))
+
 	inactiveTabBorder = tabBorderWithBottom("┴", "─", "┴")
 	activeTabBorder   = tabBorderWithBottom("┘", " ", "└")
-	highlightColor    = lipgloss.AdaptiveColor{Light: "#874BFD", Dark: "#7D56F4"}
 	activeTabStyle    = lipgloss.NewStyle().Border(activeTabBorder, true).Padding(0, 1)
 	inactiveTabStyle  = activeTabStyle.Border(inactiveTabBorder, true).Foreground(subtleColor)
+	tabSuffixStyle    = lipgloss.NewStyle().Border(tabSuffixBorder(), true).Padding(0, 1)
 )
 
 // View implements tea.Model.
