@@ -570,7 +570,7 @@ func (m *Model) handleHostTargetInfoMsg(msg hostTargetInfoMsg) tea.Cmd {
 
 	// Apply defaults.
 	if m.config.Hosts.DefaultSSHDomain != "" &&
-		strings.IndexRune(host.target.DeployHost, '.') == -1 {
+		!strings.ContainsRune(host.target.DeployHost, '.') {
 		// Append default domain.
 		host.target.DeployHost += "." + m.config.Hosts.DefaultSSHDomain
 
