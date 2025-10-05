@@ -679,6 +679,8 @@ var (
 	highlightColor = lipgloss.Color("170")
 	labelFgColor   = lipgloss.Color("230")
 	labelBgColor   = lipgloss.Color("62")
+	successColor   = lipgloss.Color("119")
+	failureColor   = lipgloss.Color("196")
 
 	subtleStyle = lipgloss.NewStyle().Foreground(subtleColor)
 	labelStyle  = lipgloss.NewStyle().MarginTop(1).Padding(0, 1).

@@ -86,8 +86,16 @@ func (m *Model) handleHostDeployOutputMsg(msg hostDeployOutputMsg) tea.Cmd {
 
 	if msg.final {
 		// Log completion.
-		logCmd := m.hostLogCmd(msg.host, fmt.Sprintf("NixOS deployment finished: %s", srunner.StateString()))
-		busyCmd := hostListDecrBusyCmd(host.name)
+		logCmd := m.hostLogCmd(
+			msg.host,
+			fmt.Sprintf("NixOS deployment finished: %s", srunner.StateString()))
+
+		status := hostItemStatusSuccess
+		if !srunner.Successful() {
+			status = hostItemStatusFailed
+		}
+		busyCmd := hostListDecrBusyCmd(host.name, status)
+
 		cmds = append(cmds, logCmd, busyCmd)
 	} else {
 		// Schedule next update.

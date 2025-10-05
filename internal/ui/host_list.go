@@ -65,10 +65,10 @@ func (m hostListModel) Update(msg tea.Msg) (hostListModel, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case hostListIncrBusyMsg:
-		cmd = m.handleHostListBusyMsg(msg.hostName, 1)
+		cmd = m.handleHostListBusyMsg(msg.hostName, 1, hostItemStatusEmpty)
 		cmds = append(cmds, cmd)
 	case hostListDecrBusyMsg:
-		cmd = m.handleHostListBusyMsg(msg.hostName, -1)
+		cmd = m.handleHostListBusyMsg(msg.hostName, -1, msg.status)
 		cmds = append(cmds, cmd)
 	case jumpToLetterMsg:
 		cmd = m.handleJumpToLetterMsg(msg)
@@ -86,12 +86,13 @@ func (m hostListModel) Update(msg tea.Msg) (hostListModel, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m *hostListModel) handleHostListBusyMsg(hostName string, delta int) tea.Cmd {
+func (m *hostListModel) handleHostListBusyMsg(hostName string, delta int, status int) tea.Cmd {
 	for i, h := range m.list.Items() {
 		if h.(hostItem).name == hostName {
 			item := h.(hostItem)
 			item.busyCount = max(0, item.busyCount+delta)
-			slog.Debug("hostListBusyMsg update", "host", hostName, "busyCount", item.busyCount)
+			item.status = status
+			slog.Debug("hostListBusyMsg update", "host", hostName, "busyCount", item.busyCount, "status", status)
 
 			m.list.SetItem(i, item)
 			return nil
@@ -154,7 +155,14 @@ func (m *hostListModel) FilterState() list.FilterState {
 type hostItem struct {
 	name      string
 	busyCount int // Number of active jobs for this host.
+	status    int // Status of most recent job for this host.
 }
+
+const (
+	hostItemStatusEmpty = iota
+	hostItemStatusSuccess
+	hostItemStatusFailed
+)
 
 func (item hostItem) FilterValue() string { return string(item.name) }
 func (item hostItem) String() string      { return string(item.name) }
@@ -182,6 +190,11 @@ func (d itemDelegate) Height() int                             { return 1 }
 func (d itemDelegate) Spacing() int                            { return 0 }
 func (d itemDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
 
+var (
+	renderedStatusSuccess = lipgloss.NewStyle().Foreground(successColor).Render("✓")
+	renderedStatusFailed  = lipgloss.NewStyle().Foreground(failureColor).Render("✗")
+)
+
 // Render a particular hostList entry.
 func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
 	item, ok := listItem.(hostItem)
@@ -196,6 +209,13 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	status := " "
 	if item.busyCount > 0 {
 		status = d.spinner.View()
+	} else {
+		switch item.status {
+		case hostItemStatusSuccess:
+			status = renderedStatusSuccess
+		case hostItemStatusFailed:
+			status = renderedStatusFailed
+		}
 	}
 
 	selected := " "
@@ -220,10 +240,11 @@ func hostListIncrBusyCmd(hostName string) tea.Cmd {
 
 type hostListDecrBusyMsg struct {
 	hostName string
+	status   int // hostItemStatus
 }
 
-func hostListDecrBusyCmd(hostName string) tea.Cmd {
+func hostListDecrBusyCmd(hostName string, status int) tea.Cmd {
 	return func() tea.Msg {
-		return hostListDecrBusyMsg{hostName: hostName}
+		return hostListDecrBusyMsg{hostName: hostName, status: status}
 	}
 }
