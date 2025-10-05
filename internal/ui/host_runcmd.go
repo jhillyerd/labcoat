@@ -79,7 +79,13 @@ func (m *Model) handleHostRunCommandOutputMsg(msg hostRunCommandOutputMsg) tea.C
 	if msg.final {
 		// Log completion.
 		logCmd := m.hostLogCmd(msg.host, fmt.Sprintf("Ran `%s`: %s", srunner, srunner.StateString()))
-		busyCmd := hostListDecrBusyCmd(host.name)
+
+		status := hostItemStatusSuccess
+		if !srunner.Successful() {
+			status = hostItemStatusFailed
+		}
+		busyCmd := hostListDecrBusyCmd(host.name, status)
+
 		cmds = append(cmds, logCmd, busyCmd)
 	} else {
 		// Schedule next update.
