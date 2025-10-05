@@ -62,11 +62,12 @@ func (m *Model) handleHostRunCommandMsg(msg hostRunCommandMsg) tea.Cmd {
 	host.runCmd.intro = intro
 	host.runCmd.contentPanel.SetContent(intro)
 
-	return srunner.Init()
+	busyCmd := hostListIncrBusyCmd(host.name)
+	return tea.Batch(srunner.Init(), busyCmd)
 }
 
 func (m *Model) handleHostRunCommandOutputMsg(msg hostRunCommandOutputMsg) tea.Cmd {
-	var cmd tea.Cmd
+	var cmds []tea.Cmd
 
 	host := msg.host
 	srunner := host.runCmd.runner
@@ -77,10 +78,13 @@ func (m *Model) handleHostRunCommandOutputMsg(msg hostRunCommandOutputMsg) tea.C
 
 	if msg.final {
 		// Log completion.
-		cmd = m.hostLogCmd(msg.host, fmt.Sprintf("Ran `%s`: %s", srunner, srunner.StateString()))
+		logCmd := m.hostLogCmd(msg.host, fmt.Sprintf("Ran `%s`: %s", srunner, srunner.StateString()))
+		busyCmd := hostListDecrBusyCmd(host.name)
+		cmds = append(cmds, logCmd, busyCmd)
 	} else {
 		// Schedule next update.
-		_, cmd = srunner.Update(nil)
+		_, cmd := srunner.Update(nil)
+		cmds = append(cmds, cmd)
 	}
 
 	// Render and cache output content.
@@ -98,5 +102,5 @@ func (m *Model) handleHostRunCommandOutputMsg(msg hostRunCommandOutputMsg) tea.C
 	output = lipgloss.NewStyle().MaxWidth(m.sizes.contentPanel.width).Render(output)
 
 	host.runCmd.contentPanel.SetContent(output)
-	return cmd
+	return tea.Batch(cmds...)
 }
