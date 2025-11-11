@@ -117,6 +117,8 @@ func (m *hostListModel) handleJumpToLetterMsg(msg jumpToLetterMsg) tea.Cmd {
 
 func (m *hostListModel) handleHostChange() tea.Cmd {
 	selected := m.list.SelectedItem()
+
+	// Comparing to previous item is not 100% reliable, this just cuts down on noise.
 	if selected != nil && selected != m.prevItem {
 		m.prevItem = selected
 
