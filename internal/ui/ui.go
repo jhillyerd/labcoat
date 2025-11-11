@@ -51,7 +51,7 @@ type Model struct {
 	hostList     hostListModel
 	hosts        map[string]*hostModel
 	selectedHost *hostModel
-	hoverTimer   *time.Timer // Triggers host status collection when user hovers.
+	hoverTimerID uint64 // Unique ID for each host hover timer.
 	nixPool      *npool.Pool
 	contentPanel *viewport.Model
 	sizes        layoutSizes
@@ -175,6 +175,7 @@ type hostChangedMsg struct {
 
 type hostHoverMsg struct {
 	hostName string
+	timerID  uint64
 }
 
 type openPagerMsg struct{}
@@ -488,26 +489,27 @@ func (m *Model) updateContentPanel() tea.Cmd {
 }
 
 func (m *Model) handleHostChangedMsg(msg hostChangedMsg) tea.Cmd {
-	// slog.Debug("hostChanged", "host", msg.hostName)
+	slog.Debug("hostChanged", "host", msg.hostName)
 
 	m.selectedHost = m.hosts[msg.hostName]
 	m.updateContentPanel()
 
-	if m.hoverTimer != nil {
-		// Discard timer for previous host.
-		m.hoverTimer.Stop()
-		m.hoverTimer = nil
-	}
+	// Invalidate previous hover timer.
+	m.hoverTimerID++
 
 	// Trigger fetch status after timeout.
-	m.hoverTimer = time.NewTimer(500 * time.Millisecond)
-	return func() tea.Msg {
-		<-m.hoverTimer.C
-		return hostHoverMsg{hostName: msg.hostName}
-	}
+	myTimerID := m.hoverTimerID
+	return tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg {
+		return hostHoverMsg{hostName: msg.hostName, timerID: myTimerID}
+	})
 }
 
 func (m *Model) handleHostHoverMsg(msg hostHoverMsg) tea.Cmd {
+	if msg.timerID != m.hoverTimerID {
+		// Timer has been invalidated.
+		return nil
+	}
+
 	hostName := msg.hostName
 	host := m.hosts[hostName]
 
