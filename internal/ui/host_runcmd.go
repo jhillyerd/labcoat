@@ -63,7 +63,7 @@ func (m *Model) handleHostRunCommandMsg(msg hostRunCommandMsg) tea.Cmd {
 	host.runCmd.contentPanel.SetContent(intro)
 
 	busyCmd := hostListIncrBusyCmd(host.name)
-	return tea.Batch(srunner.Init(), busyCmd)
+	return tea.Batch(srunner.Init(m.program), busyCmd)
 }
 
 func (m *Model) handleHostRunCommandOutputMsg(msg hostRunCommandOutputMsg) tea.Cmd {

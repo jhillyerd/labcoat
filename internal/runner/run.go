@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -154,34 +155,43 @@ func (r *Model) Closed() bool {
 	return r.closed
 }
 
-func (r *Model) waitForOutput() tea.Cmd {
-	return func() tea.Msg {
+// Async loop that waits for output and injects update messages into the program.
+func (r *Model) waitForOutput(program *tea.Program) {
+	for {
 		r.RLock()
 		complete := r.state == stateSuccess || r.state == stateFailed
 		r.RUnlock()
 
 		if complete {
 			r.Lock()
-			defer r.Unlock()
-			if r.closed {
-				return nil
-			}
 
 			// Render status text and stop waiting for output.
 			r.closed = true
 			s := r.Styles.StatusSuffix.Render("\n[" + stateToString(r) + "]")
 			_, _ = r.output.Write([]byte(s))
+			r.output.Close()
+			close(r.notify)
 
-			return nil
+			r.Unlock()
+
+			// Final update message.
+			program.Send(r.onUpdate(r))
+
+			return
 		}
 
-		<-r.notify
-		return r.onUpdate(r)
+		// Wait for output or 100ms timeout to check for completion.
+		select {
+		case <-r.notify:
+			program.Send(r.onUpdate(r))
+		case <-time.After(100 * time.Millisecond):
+			continue
+		}
 	}
 }
 
 // Init implements tea.Model.
-func (r *Model) Init() tea.Cmd {
+func (r *Model) Init(program *tea.Program) tea.Cmd {
 	cmd := func() tea.Msg {
 		r.Lock()
 		r.state = stateRunning
@@ -204,7 +214,9 @@ func (r *Model) Init() tea.Cmd {
 		return r.onUpdate(r)
 	}
 
-	return tea.Batch(cmd, r.waitForOutput())
+	go r.waitForOutput(program)
+
+	return cmd
 }
 
 // PassEnv copies a parent environment variable for use by the child process.
@@ -223,7 +235,7 @@ func (r *Model) SetEnv(name string, value string) {
 
 // Update implements tea.Model.
 func (r *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
-	return r, r.waitForOutput()
+	return r, nil
 }
 
 // View implements tea.Model.

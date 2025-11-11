@@ -47,7 +47,7 @@ func (m *Model) hostStatusCmd(host *hostModel) tea.Cmd {
 	host.status.intro = intro
 	host.status.contentPanel.SetContent(intro)
 
-	return srunner.Init()
+	return srunner.Init(m.program)
 }
 
 func (m *Model) handleHostStatusMsg(msg hostStatusMsg) tea.Cmd {

@@ -71,7 +71,7 @@ func (m *Model) handleHostDeployMsg(msg hostDeployMsg) tea.Cmd {
 
 	logCmd := m.hostLogCmd(host, fmt.Sprintf("NixOS deployment started, target: %s", targetHost))
 	busyCmd := hostListIncrBusyCmd(host.name)
-	return tea.Batch(srunner.Init(), logCmd, busyCmd)
+	return tea.Batch(srunner.Init(m.program), logCmd, busyCmd)
 }
 
 func (m *Model) handleHostDeployOutputMsg(msg hostDeployOutputMsg) tea.Cmd {
