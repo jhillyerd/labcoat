@@ -489,6 +489,11 @@ func (m *Model) updateContentPanel() tea.Cmd {
 }
 
 func (m *Model) handleHostChangedMsg(msg hostChangedMsg) tea.Cmd {
+	if m.selectedHost != nil && m.selectedHost.name == msg.hostName {
+		slog.Debug("ignoring hostChangedMsg for already selected host", "host", msg.hostName)
+		return nil
+	}
+
 	slog.Debug("hostChanged", "host", msg.hostName)
 
 	m.selectedHost = m.hosts[msg.hostName]
