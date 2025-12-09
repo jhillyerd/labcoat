@@ -106,4 +106,6 @@ Sleep 3s
 Tab
 Sleep 3s
 Tab
+Sleep 3s
+Tab
 Sleep 5s
