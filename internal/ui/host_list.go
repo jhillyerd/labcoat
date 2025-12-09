@@ -226,7 +226,7 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 		selected = "»"
 	}
 
-	line := status + style.Render(selected+item.name)
+	line := style.Render(selected) + status + style.Render(item.name)
 	fmt.Fprint(w, d.itemStyle.MaxWidth(d.maxWidth).Render(line))
 }
 
