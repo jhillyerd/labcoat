@@ -25,7 +25,7 @@ you will be better served by a parallel deployment tool such as [Colmena].
   - [ ] Use ping to track host status during reboot
 - [x] Run specified command on target host
 - [ ] Run configurable commands on target host, w/ optional confirmation
-- [ ] Record/display per-node command and deployment history
+- [x] Op Log displays per-node command and deployment history
 - [ ] Gather target host deployment/generation state
   - [ ] Flag out-of-date hosts in list UI
 - [x] External pager support
