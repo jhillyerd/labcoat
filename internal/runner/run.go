@@ -219,10 +219,12 @@ func (r *Model) Init(program *tea.Program) tea.Cmd {
 	return cmd
 }
 
-// PassEnv copies a parent environment variable for use by the child process.
-func (r *Model) PassEnv(name string) {
-	value := os.Getenv(name)
-	r.SetEnv(name, value)
+// PassEnv copies parent environment variables for use by the child process.
+func (r *Model) PassEnv(names ...string) {
+	for _, name := range names {
+		value := os.Getenv(name)
+		r.SetEnv(name, value)
+	}
 }
 
 // SetEnv appends an environment variable definition.  Due to the way `exec.Cmd` works, the first

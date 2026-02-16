@@ -56,7 +56,7 @@ func (m *Model) handleHostDeployMsg(msg hostDeployMsg) tea.Cmd {
 
 	ctx, cancel := context.WithCancel(m.ctx)
 	srunner := runner.NewLocal(ctx, onUpdate, m.flakePath, "nixos-rebuild", args...)
-	srunner.PassEnv("PATH")
+	srunner.PassEnv("HOME", "PATH", "SSH_AUTH_SOCK", "SSH_TTY")
 
 	srunner.Styles.StatusSuffix = subtleStyle
 	host.deploy.runner = srunner
