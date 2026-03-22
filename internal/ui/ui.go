@@ -10,14 +10,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/jhillyerd/labcoat/internal/config"
 	"github.com/jhillyerd/labcoat/internal/nix"
 	"github.com/jhillyerd/labcoat/internal/npool"
@@ -149,9 +149,8 @@ func New(
 }
 
 func newContentPanel(keys config.KeyMap) viewport.Model {
-	cp := viewport.New(80, 25)
+	cp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(25))
 
-	// TODO consider handling keymaps/mouse in ui.Update().
 	cp.KeyMap.PageUp = keys.ScrollUp
 	cp.KeyMap.PageDown = keys.ScrollDown
 
@@ -213,7 +212,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	)
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// slog.Debug("tea.KeyMsg", "key", msg)
 
 		if msg.String() == "ctrl+\\" {
@@ -480,8 +479,8 @@ func (m *Model) updateContentPanel() tea.Cmd {
 			return nil
 		}
 
-		m.contentPanel.Width = m.sizes.contentPanel.width
-		m.contentPanel.Height = m.sizes.contentPanel.height
+		m.contentPanel.SetWidth(m.sizes.contentPanel.width)
+		m.contentPanel.SetHeight(m.sizes.contentPanel.height)
 		m.ready = true
 	}
 
@@ -707,15 +706,15 @@ var (
 )
 
 // View implements tea.Model.
-func (m Model) View() string {
-	// Postpone rendering until screen dimensions are known.
+func (m Model) View() tea.View {
 	if !m.ready {
-		return "\n"
+		return tea.NewView("\n")
 	}
 
+	var content string
 	switch m.viewMode {
 	case viewModeHosts:
-		hosts := hostListStyle.Width(m.sizes.hostList.width + 2).Render(m.hostList.View())
+		hosts := hostListStyle.Width(m.sizes.hostList.width + 4).Render(m.hostList.View())
 
 		scroll := "(END)"
 		if !m.contentPanel.AtBottom() {
@@ -763,10 +762,9 @@ func (m Model) View() string {
 		contentHeader := lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
 
 		contentFooter := contentFooterStyle.Render(scroll)
-		content := contentHeader + "\n" +
+		content = contentHeader + "\n" +
 			contentPanelStyle.Render(m.contentPanel.View()+"\n"+contentFooter)
 
-		// Display help or error flash if present.
 		hintBar := ""
 		switch {
 		case m.flashText != "":
@@ -785,21 +783,26 @@ func (m Model) View() string {
 			hintBar = hintBarStyle.Render(m.help.ShortHelpView(m.keys.ShortHelp()))
 		}
 
-		return lipgloss.JoinHorizontal(lipgloss.Top, hosts, content) + "\n" + hintBar
+		content = lipgloss.JoinHorizontal(lipgloss.Top, hosts, content) + "\n" + hintBar
 
 	case viewModeText:
-		return m.text + "\n\n" +
+		content = m.text + "\n\n" +
 			subtleStyle.Render("[Press any key to continue]")
 
 	case viewModeError:
-		return labelStyle.Render("Critical Error") +
+		content = labelStyle.Render("Critical Error") +
 			"\n\n" +
 			m.error +
 			"\n\n" +
 			subtleStyle.Render("[Press Esc to continue]")
+
+	default:
+		content = fmt.Sprintf("Unknown view mode: %v", m.viewMode)
 	}
 
-	return fmt.Sprintf("Unknown view mode: %v", m.viewMode)
+	v := tea.NewView(content)
+	v.AltScreen = true
+	return v
 }
 
 // Calcuate size of panels based on window dimensions.

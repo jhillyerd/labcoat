@@ -1,7 +1,7 @@
 package config
 
 import (
-	"github.com/charmbracelet/bubbles/key"
+	"charm.land/bubbles/v2/key"
 )
 
 type KeyMap struct {

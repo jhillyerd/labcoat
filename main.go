@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/jhillyerd/labcoat/internal/config"
 	"github.com/jhillyerd/labcoat/internal/nix"
 	"github.com/jhillyerd/labcoat/internal/store"
@@ -122,7 +122,7 @@ func main() {
 	}
 
 	// Launch UI.
-	p := tea.NewProgram(ui.New(*conf, config.DefaultKeyMap, flakePath, hosts, dbs), tea.WithAltScreen())
+	p := tea.NewProgram(ui.New(*conf, config.DefaultKeyMap, flakePath, hosts, dbs))
 	go p.Send(p)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
