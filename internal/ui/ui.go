@@ -98,7 +98,79 @@ type textInput struct {
 	submitFn func(string) tea.Cmd
 }
 
+// textDialog is a modal dialog that displays text content with a prompt to continue.
+type textDialog struct {
+	content string
+}
+
+// View renders the textDialog content with styling.
+func (d *textDialog) View() string {
+	style := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#7dcfff")).
+		Padding(1, 2)
+
+	return style.Render(d.content)
+}
+
+// Overlay renders the textDialog centered on top of the background content using
+// the lipgloss compositor for proper layering.
+func (d *textDialog) Overlay(background string, width, height int) string {
+	dialog := d.View()
+
+	bgLayer := lipgloss.NewLayer(background)
+	dialogLayer := lipgloss.NewLayer(dialog)
+
+	dialogW := lipgloss.Width(dialog)
+	dialogH := lipgloss.Height(dialog)
+	centerX := (width - dialogW) / 2
+	centerY := (height - dialogH) / 2
+
+	dialogLayer.X(centerX).Y(centerY).Z(1)
+
+	compositor := lipgloss.NewCompositor(bgLayer, dialogLayer)
+	return compositor.Render()
+}
+
+// errorDialog is a modal dialog that displays critical error messages to the user.
+type errorDialog struct {
+	content string
+}
+
+// View renders the errorDialog content with a title and styled error message.
+func (d *errorDialog) View() string {
+	style := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#ff6b6b")).
+		Padding(1, 2)
+
+	title := labelStyle.Render("Critical Error")
+	body := title + "\n\n" + d.content + "\n\n" + subtleStyle.Render("[Press Esc to continue]")
+	return style.Render(body)
+}
+
+// Overlay renders the errorDialog centered on top of the background content using
+// the lipgloss compositor for proper layering.
+func (d *errorDialog) Overlay(background string, width, height int) string {
+	dialog := d.View()
+
+	bgLayer := lipgloss.NewLayer(background)
+	dialogLayer := lipgloss.NewLayer(dialog)
+
+	dialogW := lipgloss.Width(dialog)
+	dialogH := lipgloss.Height(dialog)
+	centerX := (width - dialogW) / 2
+	centerY := (height - dialogH) / 2
+
+	dialogLayer.X(centerX).Y(centerY).Z(1)
+
+	compositor := lipgloss.NewCompositor(bgLayer, dialogLayer)
+	return compositor.Render()
+}
+
 type layoutSizes struct {
+	width         int
+	height        int
 	hostList      dim
 	contentHeader dim
 	contentPanel  dim
@@ -711,93 +783,85 @@ func (m Model) View() tea.View {
 		return tea.NewView("\n")
 	}
 
-	var content string
-	switch m.viewMode {
-	case viewModeHosts:
-		hosts := hostListStyle.Width(m.sizes.hostList.width + 4).Render(m.hostList.View())
+	hosts := hostListStyle.Width(m.sizes.hostList.width + 4).Render(m.hostList.View())
 
-		scroll := "(END)"
-		if !m.contentPanel.AtBottom() {
-			scroll = fmt.Sprintf("%.0f%%", m.contentPanel.ScrollPercent()*100)
-		}
+	scroll := "(END)"
+	if !m.contentPanel.AtBottom() {
+		scroll = fmt.Sprintf("%.0f%%", m.contentPanel.ScrollPercent()*100)
+	}
 
-		hostName := "None"
-		selectedTab := 0
-		if m.selectedHost != nil {
-			selectedTab = m.selectedHost.hostTab
-			hostName = m.selectedHost.name
+	hostName := "None"
+	selectedTab := 0
+	if m.selectedHost != nil {
+		selectedTab = m.selectedHost.hostTab
+		hostName = m.selectedHost.name
 
-			m.withVisibleRunner(func(r *runner.Model) {
-				if r.Running() {
-					scroll += " - Running"
-				}
-			})
-		}
-
-		var renderedTabs []string
-		var tabBarWidth int
-		for i, t := range hostTabNames {
-			var style lipgloss.Style
-			isFirst, isActive := i == 0, i == selectedTab
-			if isActive {
-				style = activeTabStyle
-			} else {
-				style = inactiveTabStyle
+		m.withVisibleRunner(func(r *runner.Model) {
+			if r.Running() {
+				scroll += " - Running"
 			}
-			border, _, _, _, _ := style.GetBorder()
-			if isFirst && isActive {
-				border.BottomLeft = "│"
-			} else if isFirst && !isActive {
-				border.BottomLeft = "├"
-			}
-			style = style.Border(border)
-			rendered := style.Render(t)
-			tabBarWidth += lipgloss.Width(rendered)
-			renderedTabs = append(renderedTabs, rendered)
+		})
+	}
+
+	var renderedTabs []string
+	var tabBarWidth int
+	for i, t := range hostTabNames {
+		var style lipgloss.Style
+		isFirst, isActive := i == 0, i == selectedTab
+		if isActive {
+			style = activeTabStyle
+		} else {
+			style = inactiveTabStyle
 		}
-
-		barSuffix := lipgloss.PlaceHorizontal(
-			m.sizes.contentHeader.width-tabBarWidth, lipgloss.Center, hostName)
-		renderedTabs = append(renderedTabs, tabSuffixStyle.Render(barSuffix))
-		contentHeader := lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
-
-		contentFooter := contentFooterStyle.Render(scroll)
-		content = contentHeader + "\n" +
-			contentPanelStyle.Render(m.contentPanel.View()+"\n"+contentFooter)
-
-		hintBar := ""
-		switch {
-		case m.flashText != "":
-			hintBar = errorFlashStyle.Render(m.flashText)
-
-		case m.confirmation != nil:
-			hintBar = confirmDialogStyle.Render(m.confirmation.text)
-
-		case m.jumpToLetter:
-			hintBar = confirmDialogStyle.Render("Jump to letter: ")
-
-		case m.textInput != nil:
-			hintBar = m.textInput.model.View()
-
-		default:
-			hintBar = hintBarStyle.Render(m.help.ShortHelpView(m.keys.ShortHelp()))
+		border, _, _, _, _ := style.GetBorder()
+		if isFirst && isActive {
+			border.BottomLeft = "│"
+		} else if isFirst && !isActive {
+			border.BottomLeft = "├"
 		}
+		style = style.Border(border)
+		rendered := style.Render(t)
+		tabBarWidth += lipgloss.Width(rendered)
+		renderedTabs = append(renderedTabs, rendered)
+	}
 
-		content = lipgloss.JoinHorizontal(lipgloss.Top, hosts, content) + "\n" + hintBar
+	barSuffix := lipgloss.PlaceHorizontal(
+		m.sizes.contentHeader.width-tabBarWidth, lipgloss.Center, hostName)
+	renderedTabs = append(renderedTabs, tabSuffixStyle.Render(barSuffix))
+	contentHeader := lipgloss.JoinHorizontal(lipgloss.Top, renderedTabs...)
 
-	case viewModeText:
-		content = m.text + "\n\n" +
-			subtleStyle.Render("[Press any key to continue]")
+	contentFooter := contentFooterStyle.Render(scroll)
+	content := contentHeader + "\n" +
+		contentPanelStyle.Render(m.contentPanel.View()+"\n"+contentFooter)
 
-	case viewModeError:
-		content = labelStyle.Render("Critical Error") +
-			"\n\n" +
-			m.error +
-			"\n\n" +
-			subtleStyle.Render("[Press Esc to continue]")
+	hintBar := ""
+	switch {
+	case m.flashText != "":
+		hintBar = errorFlashStyle.Render(m.flashText)
+
+	case m.confirmation != nil:
+		hintBar = confirmDialogStyle.Render(m.confirmation.text)
+
+	case m.jumpToLetter:
+		hintBar = confirmDialogStyle.Render("Jump to letter: ")
+
+	case m.textInput != nil:
+		hintBar = m.textInput.model.View()
 
 	default:
-		content = fmt.Sprintf("Unknown view mode: %v", m.viewMode)
+		hintBar = hintBarStyle.Render(m.help.ShortHelpView(m.keys.ShortHelp()))
+	}
+
+	content = lipgloss.JoinHorizontal(lipgloss.Top, hosts, content) + "\n" + hintBar
+
+	switch m.viewMode {
+	case viewModeText:
+		dialog := &textDialog{content: m.text + "\n\n" + subtleStyle.Render("[Press any key to continue]")}
+		content = dialog.Overlay(content, m.sizes.width, m.sizes.height)
+
+	case viewModeError:
+		dialog := &errorDialog{content: m.error}
+		content = dialog.Overlay(content, m.sizes.width, m.sizes.height)
 	}
 
 	v := tea.NewView(content)
@@ -814,6 +878,9 @@ func calculateSizes(win tea.WindowSizeMsg) layoutSizes {
 		frameWidth  int
 		frameHeight int
 	)
+
+	s.width = win.Width
+	s.height = win.Height
 
 	// Host list and hint bar.
 	s.hintBar.height = 1
