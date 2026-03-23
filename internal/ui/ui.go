@@ -98,76 +98,6 @@ type textInput struct {
 	submitFn func(string) tea.Cmd
 }
 
-// textDialog is a modal dialog that displays text content with a prompt to continue.
-type textDialog struct {
-	content string
-}
-
-// View renders the textDialog content with styling.
-func (d *textDialog) View() string {
-	style := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#7dcfff")).
-		Padding(1, 2)
-
-	return style.Render(d.content)
-}
-
-// Overlay renders the textDialog centered on top of the background content using
-// the lipgloss compositor for proper layering.
-func (d *textDialog) Overlay(background string, width, height int) string {
-	dialog := d.View()
-
-	bgLayer := lipgloss.NewLayer(background)
-	dialogLayer := lipgloss.NewLayer(dialog)
-
-	dialogW := lipgloss.Width(dialog)
-	dialogH := lipgloss.Height(dialog)
-	centerX := (width - dialogW) / 2
-	centerY := (height - dialogH) / 2
-
-	dialogLayer.X(centerX).Y(centerY).Z(1)
-
-	compositor := lipgloss.NewCompositor(bgLayer, dialogLayer)
-	return compositor.Render()
-}
-
-// errorDialog is a modal dialog that displays critical error messages to the user.
-type errorDialog struct {
-	content string
-}
-
-// View renders the errorDialog content with a title and styled error message.
-func (d *errorDialog) View() string {
-	style := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#ff6b6b")).
-		Padding(1, 2)
-
-	title := labelStyle.Render("Critical Error")
-	body := title + "\n\n" + d.content + "\n\n" + subtleStyle.Render("[Press Esc to continue]")
-	return style.Render(body)
-}
-
-// Overlay renders the errorDialog centered on top of the background content using
-// the lipgloss compositor for proper layering.
-func (d *errorDialog) Overlay(background string, width, height int) string {
-	dialog := d.View()
-
-	bgLayer := lipgloss.NewLayer(background)
-	dialogLayer := lipgloss.NewLayer(dialog)
-
-	dialogW := lipgloss.Width(dialog)
-	dialogH := lipgloss.Height(dialog)
-	centerX := (width - dialogW) / 2
-	centerY := (height - dialogH) / 2
-
-	dialogLayer.X(centerX).Y(centerY).Z(1)
-
-	compositor := lipgloss.NewCompositor(bgLayer, dialogLayer)
-	return compositor.Render()
-}
-
 type layoutSizes struct {
 	width         int
 	height        int
@@ -856,11 +786,14 @@ func (m Model) View() tea.View {
 
 	switch m.viewMode {
 	case viewModeText:
-		dialog := &textDialog{content: m.text + "\n\n" + subtleStyle.Render("[Press any key to continue]")}
+		dialogContent := m.text + "\n\n" + subtleStyle.Render("[Press any key to continue]")
+		dialog := NewDialog(dialogContent, lipgloss.Color("#7dcfff"))
 		content = dialog.Overlay(content, m.sizes.width, m.sizes.height)
 
 	case viewModeError:
-		dialog := &errorDialog{content: m.error}
+		dialogContent := labelStyle.Render("Critical Error") +
+			"\n\n" + m.error + "\n\n" + subtleStyle.Render("[Press Esc to continue]")
+		dialog := NewDialog(dialogContent, lipgloss.Color("#ff6b6b"))
 		content = dialog.Overlay(content, m.sizes.width, m.sizes.height)
 	}
 
