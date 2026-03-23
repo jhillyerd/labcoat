@@ -99,8 +99,7 @@ type textInput struct {
 }
 
 type layoutSizes struct {
-	width         int
-	height        int
+	screen        dim
 	hostList      dim
 	contentHeader dim
 	contentPanel  dim
@@ -788,13 +787,13 @@ func (m Model) View() tea.View {
 	case viewModeText:
 		dialogContent := m.text + "\n\n" + subtleStyle.Render("[Press any key to continue]")
 		dialog := NewDialog(dialogContent, lipgloss.Color("#7dcfff"))
-		content = dialog.Overlay(content, m.sizes.width, m.sizes.height)
+		content = dialog.Overlay(content, m.sizes.screen.width, m.sizes.screen.height)
 
 	case viewModeError:
 		dialogContent := labelStyle.Render("Critical Error") +
 			"\n\n" + m.error + "\n\n" + subtleStyle.Render("[Press Esc to continue]")
 		dialog := NewDialog(dialogContent, lipgloss.Color("#ff6b6b"))
-		content = dialog.Overlay(content, m.sizes.width, m.sizes.height)
+		content = dialog.Overlay(content, m.sizes.screen.width, m.sizes.screen.height)
 	}
 
 	v := tea.NewView(content)
@@ -812,8 +811,8 @@ func calculateSizes(win tea.WindowSizeMsg) layoutSizes {
 		frameHeight int
 	)
 
-	s.width = win.Width
-	s.height = win.Height
+	s.screen.width = win.Width
+	s.screen.height = win.Height
 
 	// Host list and hint bar.
 	s.hintBar.height = 1
