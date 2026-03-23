@@ -29,6 +29,7 @@ const (
 	viewModeHosts = iota
 	viewModeText
 	viewModeError
+	viewModeConfirm
 )
 
 const (
@@ -262,12 +263,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.String() == "y" {
 				cmd = m.confirmation.yesCmd
 				m.confirmation = nil
+				m.viewMode = viewModeHosts
 				return m, cmd
 			}
 
 			if msg.String() == "n" {
 				cmd = m.confirmation.noCmd
 				m.confirmation = nil
+				m.viewMode = viewModeHosts
 				return m, cmd
 			}
 
@@ -326,7 +329,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, func() tea.Msg {
 				return confirmationMsg{
-					text:   fmt.Sprintf("Confirm reboot of %q? y/n:", m.selectedHost.target.DeployHost),
+					text:   fmt.Sprintf("Confirm reboot of %q?", m.selectedHost.target.DeployHost),
 					yesCmd: m.hostRunCommandCmd(m.selectedHost, "/run/current-system/sw/bin/reboot"),
 				}
 			}
@@ -400,6 +403,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case confirmationMsg:
 		m.confirmation = &msg
+		m.viewMode = viewModeConfirm
 		return m, nil
 
 	case textInputPromptMsg:
@@ -768,9 +772,6 @@ func (m Model) View() tea.View {
 	case m.flashText != "":
 		hintBar = errorFlashStyle.Render(m.flashText)
 
-	case m.confirmation != nil:
-		hintBar = confirmDialogStyle.Render(m.confirmation.text)
-
 	case m.jumpToLetter:
 		hintBar = confirmDialogStyle.Render("Jump to letter: ")
 
@@ -793,6 +794,11 @@ func (m Model) View() tea.View {
 		dialogContent := labelStyle.Render("Critical Error") +
 			"\n\n" + m.error + "\n\n" + subtleStyle.Render("[Press Esc to continue]")
 		dialog := NewDialog(dialogContent, lipgloss.Color("#ff6b6b"))
+		content = dialog.Overlay(content, m.sizes.screen.width, m.sizes.screen.height)
+
+	case viewModeConfirm:
+		dialogContent := m.confirmation.text + "\n\n" + subtleStyle.Render("[y/n]")
+		dialog := NewDialog(dialogContent, lipgloss.Color("#e0af68"))
 		content = dialog.Overlay(content, m.sizes.screen.width, m.sizes.screen.height)
 	}
 
