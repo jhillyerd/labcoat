@@ -132,6 +132,11 @@ Doc comments for exported items, starting with the name:
 func Load(path string, mustExist bool) (*Config, error) {
 ```
 
+Longer functions should have inline comments explaining complex logic, or
+anything likely to confuse the reader. Avoid obvious comments.
+
+Do not remove existing comments unless they are outdated or incorrect.
+
 ### Bubble Tea Patterns
 
 - Use tea.Cmd for async operations, tea.Batch for multiple commands
