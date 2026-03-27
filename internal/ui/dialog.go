@@ -52,20 +52,25 @@ func (d *Dialog) Overlay(background string, width, height int) string {
 }
 
 type InputOverlay struct {
-	input    textinput.Model
-	title    string
-	visible  bool
-	submitFn func(string) tea.Cmd
+	input      textinput.Model
+	title      string
+	visible    bool
+	submitFn   func(string) tea.Cmd
+	history    *[]string
+	historyIdx int
+	tempValue  string
 }
 
-func NewInputOverlay(title string, submitFn func(string) tea.Cmd) *InputOverlay {
+func NewInputOverlay(title string, submitFn func(string) tea.Cmd, history *[]string) *InputOverlay {
 	ti := textinput.New()
 	ti.Focus()
 	return &InputOverlay{
-		input:    ti,
-		title:    title,
-		visible:  true,
-		submitFn: submitFn,
+		input:      ti,
+		title:      title,
+		visible:    true,
+		submitFn:   submitFn,
+		history:    history,
+		historyIdx: -1,
 	}
 }
 
@@ -91,6 +96,30 @@ func (o *InputOverlay) Update(msg tea.Msg) tea.Cmd {
 		case "enter":
 			o.visible = false
 			return nil
+		case "up":
+			if o.history != nil && len(*o.history) > 0 {
+				if o.historyIdx == -1 {
+					o.tempValue = o.input.Value()
+					o.historyIdx = len(*o.history) - 1
+				} else if o.historyIdx > 0 {
+					o.historyIdx--
+				}
+				o.input.SetValue((*o.history)[o.historyIdx])
+				o.input.CursorEnd()
+			}
+			return nil
+		case "down":
+			if o.history != nil && o.historyIdx != -1 {
+				if o.historyIdx < len(*o.history)-1 {
+					o.historyIdx++
+					o.input.SetValue((*o.history)[o.historyIdx])
+				} else {
+					o.historyIdx = -1
+					o.input.SetValue(o.tempValue)
+				}
+				o.input.CursorEnd()
+			}
+			return nil
 		}
 	}
 
@@ -104,13 +133,18 @@ func (o *InputOverlay) View() string {
 		return ""
 	}
 
+	hint := "enter: run • esc: cancel"
+	if o.history != nil && len(*o.history) > 0 {
+		hint = "enter: run • ↑↓: history • esc: cancel"
+	}
+
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
 		o.title,
 		"",
 		o.input.View(),
 		"",
-		subtleStyle.Render("enter: run • esc: cancel"),
+		subtleStyle.Render(hint),
 	)
 
 	style := lipgloss.NewStyle().

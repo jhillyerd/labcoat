@@ -65,6 +65,7 @@ type Model struct {
 	error        string
 	flashText    string
 	flashTimer   *time.Timer
+	cmdHistory   []string
 }
 
 type hostModel struct {
@@ -280,6 +281,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					value := m.inputOverlay.Value()
 					submitFn := m.inputOverlay.submitFn
 					m.inputOverlay = nil
+					if value != "" {
+						m.addToCmdHistory(value)
+					}
 					return m, submitFn(value)
 				}
 				m.inputOverlay = nil
@@ -396,7 +400,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case textInputPromptMsg:
-		m.inputOverlay = NewInputOverlay(msg.prompt, msg.submitFn)
+		m.inputOverlay = NewInputOverlay(msg.prompt, msg.submitFn, &m.cmdHistory)
 
 	case criticalErrorMsg:
 		m.viewMode = viewModeError
@@ -867,6 +871,21 @@ func errorFlashCmd(format string, a ...any) tea.Cmd {
 		return errorFlashMsg{
 			text: text,
 		}
+	}
+}
+
+const maxCmdHistory = 10
+
+func (m *Model) addToCmdHistory(cmd string) {
+	for i, c := range m.cmdHistory {
+		if c == cmd {
+			m.cmdHistory = append(m.cmdHistory[:i], m.cmdHistory[i+1:]...)
+			break
+		}
+	}
+	m.cmdHistory = append(m.cmdHistory, cmd)
+	if len(m.cmdHistory) > maxCmdHistory {
+		m.cmdHistory = m.cmdHistory[len(m.cmdHistory)-maxCmdHistory:]
 	}
 }
 
