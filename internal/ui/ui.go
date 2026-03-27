@@ -14,7 +14,6 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/spinner"
-	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -61,7 +60,7 @@ type Model struct {
 	spinner      spinner.Model
 	jumpToLetter bool
 	confirmation *confirmationMsg
-	textInput    *textInput
+	inputOverlay *InputOverlay
 	text         string
 	error        string
 	flashText    string
@@ -92,11 +91,6 @@ type hostModel struct {
 		contentPanel viewport.Model
 		runner       *runner.Model
 	}
-}
-
-type textInput struct {
-	model    textinput.Model
-	submitFn func(string) tea.Cmd
 }
 
 type layoutSizes struct {
@@ -278,23 +272,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		if m.textInput != nil {
-			// Active text input dialog is capturing key presses.
-			switch msg.String() {
-			case "ctrl+c", "esc":
-				m.textInput = nil
-				return m, nil
-
-			case "enter":
-				value := m.textInput.model.Value()
-				submitFn := m.textInput.submitFn
-				m.textInput = nil
-				return m, submitFn(value)
+		if m.inputOverlay != nil && m.inputOverlay.IsVisible() {
+			visible := m.inputOverlay.IsVisible()
+			cmd = m.inputOverlay.Update(msg)
+			if !m.inputOverlay.IsVisible() && visible {
+				if msg.String() == "enter" {
+					value := m.inputOverlay.Value()
+					submitFn := m.inputOverlay.submitFn
+					m.inputOverlay = nil
+					return m, submitFn(value)
+				}
+				m.inputOverlay = nil
 			}
-
-			ti, cmd := m.textInput.model.Update(msg)
-			m.textInput.model = ti
-
 			return m, cmd
 		}
 
@@ -407,13 +396,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case textInputPromptMsg:
-		ti := textinput.New()
-		ti.Prompt = msg.prompt
-		ti.Focus()
-		m.textInput = &textInput{
-			model:    ti,
-			submitFn: msg.submitFn,
-		}
+		m.inputOverlay = NewInputOverlay(msg.prompt, msg.submitFn)
 
 	case criticalErrorMsg:
 		m.viewMode = viewModeError
@@ -775,9 +758,6 @@ func (m Model) View() tea.View {
 	case m.jumpToLetter:
 		hintBar = confirmDialogStyle.Render("Jump to letter: ")
 
-	case m.textInput != nil:
-		hintBar = m.textInput.model.View()
-
 	default:
 		hintBar = hintBarStyle.Render(m.help.ShortHelpView(m.keys.ShortHelp()))
 	}
@@ -800,6 +780,10 @@ func (m Model) View() tea.View {
 		dialogContent := m.confirmation.text + "\n\n" + subtleStyle.Render("[y/n]")
 		dialog := NewDialog(dialogContent, lipgloss.Color("#e0af68"))
 		content = dialog.Overlay(content, m.sizes.screen.width, m.sizes.screen.height)
+	}
+
+	if m.inputOverlay != nil && m.inputOverlay.IsVisible() {
+		content = m.inputOverlay.Overlay(content, m.sizes.screen.width, m.sizes.screen.height)
 	}
 
 	v := tea.NewView(content)
