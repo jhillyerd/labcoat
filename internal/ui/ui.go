@@ -195,10 +195,15 @@ type errorFlashMsg struct {
 	text string
 }
 
+type flakeMetadataMsg struct {
+	meta nix.FlakeMetadata
+}
+
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.hostList.Init(),
 		m.spinner.Tick,
+		m.fetchFlakeMetadataCmd(),
 	)
 }
 
@@ -409,6 +414,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case errorFlashMsg:
 		return m, m.handleErrorFlashMsg(msg)
 
+	case flakeMetadataMsg:
+		return m, m.handleFlakeMetadataMsg(msg)
+
 	case *tea.Program:
 		m.program = msg
 
@@ -576,6 +584,40 @@ func (m *Model) handleHostTargetInfoMsg(msg hostTargetInfoMsg) tea.Cmd {
 
 	// Fetch host status now that we know target info.
 	return m.hostStatusCmd(host)
+}
+
+func (m *Model) fetchFlakeMetadataCmd() tea.Cmd {
+	return func() tea.Msg {
+		const timeout = 30 * time.Second
+
+		ctx, done := context.WithTimeout(context.Background(), timeout)
+		defer done()
+
+		worker, err := m.nixPool.Get(ctx)
+		if err != nil {
+			slog.Error("failed to get nix worker for flake metadata", "err", err, "timeout", timeout)
+			return nil
+		}
+		defer worker.Done()
+
+		slog.Info("Fetching flake metadata", "worker", worker)
+		meta, err := nix.GetFlakeMetadata(m.flakePath)
+		if err != nil {
+			slog.Error("Failed to fetch flake metadata", "worker", worker, "err", err)
+			return nil
+		}
+		slog.Info("Fetched flake metadata",
+			"worker", worker, "revision", meta.Revision, "fingerprint", meta.Fingerprint)
+
+		return flakeMetadataMsg{meta: *meta}
+	}
+}
+
+func (m *Model) handleFlakeMetadataMsg(msg flakeMetadataMsg) tea.Cmd {
+	if err := m.db.StoreFlakeVersion(msg.meta); err != nil {
+		slog.Error("Failed to store flake version", "err", err)
+	}
+	return nil
 }
 
 func (m *Model) handleOpenPagerMsg(_ openPagerMsg) tea.Cmd {

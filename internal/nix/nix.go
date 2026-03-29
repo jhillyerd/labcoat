@@ -90,6 +90,54 @@ func GetTargetInfo(data TargetInfoRequest) (*TargetInfo, error) {
 	return &targetInfo, nil
 }
 
+type FlakeMetadata struct {
+	ResolvedUrl  string
+	Revision     string
+	Dirty        bool
+	LastModified int64
+	Fingerprint  string
+}
+
+type flakeMetadataJSON struct {
+	ResolvedUrl   string `json:"resolvedUrl"`
+	Revision      string `json:"revision"`
+	DirtyRevision string `json:"dirtyRevision"`
+	LastModified  int64  `json:"lastModified"`
+	Fingerprint   string `json:"fingerprint"`
+}
+
+func GetFlakeMetadata(flakePath string) (*FlakeMetadata, error) {
+	cmd := exec.Command("nix", "flake", "metadata", "--json", flakePath)
+	output, err := cmd.Output()
+	if err != nil {
+		out := ""
+		if exit, ok := err.(*exec.ExitError); ok {
+			out = "\n\nOutput:\n" + string(exit.Stderr)
+		}
+		return nil, fmt.Errorf("nix flake metadata failed: %w%s", err, out)
+	}
+
+	var raw flakeMetadataJSON
+	if err := json.Unmarshal(output, &raw); err != nil {
+		return nil, fmt.Errorf("nix flake metadata decode failed: %w", err)
+	}
+
+	meta := &FlakeMetadata{
+		ResolvedUrl:  raw.ResolvedUrl,
+		LastModified: raw.LastModified,
+		Fingerprint:  raw.Fingerprint,
+	}
+
+	if raw.DirtyRevision != "" {
+		meta.Revision = raw.DirtyRevision
+		meta.Dirty = true
+	} else {
+		meta.Revision = raw.Revision
+	}
+
+	return meta, nil
+}
+
 func runScript(tmpl *template.Template, data any) ([]byte, error) {
 	// Render script.
 	var scriptBuf bytes.Buffer
