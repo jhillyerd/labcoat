@@ -24,7 +24,7 @@
             src = ./.;
 
             # Must be updated if go.mod changes.
-            vendorHash = "sha256-uauVXw9SK0M8yTMumViAK6gLAp84Xq/Q2+6nzTw6DmA=";
+            vendorHash = "sha256-XmqOow2esgXcRFumWVulZS4gOnT9m8tuswwc7OjyuH4=";
 
             meta.mainProgram = "labcoat";
           };
@@ -37,6 +37,7 @@
               go
               golint
               gopls
+              nix-update
               vhs
             ];
 

@@ -2,8 +2,8 @@ package store
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
+	"github.com/vmihailenco/msgpack/v5"
 	"slices"
 	"time"
 
@@ -134,7 +134,7 @@ func (b *BoltDB) StoreFlakeVersion(meta nix.FlakeMetadata) error {
 			StoredAt:     time.Now(),
 		}
 
-		data, err := json.Marshal(version)
+		data, err := msgpack.Marshal(version)
 		if err != nil {
 			return fmt.Errorf("Failed to marshal flake version: %w", err)
 		}
@@ -155,7 +155,7 @@ func (b *BoltDB) ListFlakeVersions() ([]FlakeVersion, error) {
 		c := bucket.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			var fv FlakeVersion
-			if err := json.Unmarshal(v, &fv); err != nil {
+			if err := msgpack.Unmarshal(v, &fv); err != nil {
 				return fmt.Errorf("Failed to unmarshal flake version: %w", err)
 			}
 			versions = append(versions, fv)
@@ -191,7 +191,7 @@ func (b *BoltDB) GetFlakeVersion(fingerprint string) (*FlakeVersion, error) {
 		}
 
 		var v FlakeVersion
-		if err := json.Unmarshal(data, &v); err != nil {
+		if err := msgpack.Unmarshal(data, &v); err != nil {
 			return fmt.Errorf("Failed to unmarshal flake version: %w", err)
 		}
 
