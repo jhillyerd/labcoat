@@ -204,6 +204,8 @@ type flakeMetadataMsg struct {
 	meta nix.FlakeMetadata
 }
 
+type flakeMetadataTickMsg struct{}
+
 type textDisplayMsg struct {
 	text string
 }
@@ -437,6 +439,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case flakeMetadataMsg:
 		return m, m.handleFlakeMetadataMsg(msg)
 
+	case flakeMetadataTickMsg:
+		return m, m.fetchFlakeMetadataCmd()
+
 	case textDisplayMsg:
 		m.viewMode = viewModeText
 		m.text = msg.text
@@ -642,7 +647,9 @@ func (m *Model) handleFlakeMetadataMsg(msg flakeMetadataMsg) tea.Cmd {
 	if err := m.db.StoreFlakeVersion(msg.meta); err != nil {
 		slog.Error("Failed to store flake version", "err", err)
 	}
-	return nil
+	return tea.Tick(time.Minute, func(time.Time) tea.Msg {
+		return flakeMetadataTickMsg{}
+	})
 }
 
 func (m *Model) handleOpenPagerMsg(_ openPagerMsg) tea.Cmd {
