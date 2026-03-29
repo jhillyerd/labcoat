@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -41,31 +42,32 @@ const (
 var hostTabNames = []string{"Host Status", "Deploy", "Run Command", "Op Log"}
 
 type Model struct {
-	ctx          context.Context
-	program      *tea.Program
-	db           *store.BoltDB
-	config       config.Config
-	ready        bool // true once screen size is known.
-	viewMode     int  // Current UI mode.
-	flakePath    string
-	hostList     hostListModel
-	hosts        map[string]*hostModel
-	selectedHost *hostModel
-	hoverTimerID uint64 // Unique ID for each host hover timer.
-	nixPool      *npool.Pool
-	contentPanel *viewport.Model
-	sizes        layoutSizes
-	keys         config.KeyMap
-	help         help.Model
-	spinner      spinner.Model
-	jumpToLetter bool
-	confirmation *confirmationMsg
-	inputOverlay *InputOverlay
-	text         string
-	error        string
-	flashText    string
-	flashTimer   *time.Timer
-	cmdHistory   []string
+	ctx            context.Context
+	program        *tea.Program
+	db             *store.BoltDB
+	config         config.Config
+	ready          bool // true once screen size is known.
+	viewMode       int  // Current UI mode.
+	flakePath      string
+	hostList       hostListModel
+	hosts          map[string]*hostModel
+	selectedHost   *hostModel
+	hoverTimerID   uint64 // Unique ID for each host hover timer.
+	nixPool        *npool.Pool
+	contentPanel   *viewport.Model
+	sizes          layoutSizes
+	keys           config.KeyMap
+	help           help.Model
+	spinner        spinner.Model
+	jumpToLetter   bool
+	confirmation   *confirmationMsg
+	commandPalette *CommandPalette
+	inputOverlay   *InputOverlay
+	text           string
+	error          string
+	flashText      string
+	flashTimer     *time.Timer
+	cmdHistory     []string
 }
 
 type hostModel struct {
@@ -130,7 +132,7 @@ func New(
 		hosts[v] = hm
 	}
 
-	return Model{
+	m := Model{
 		ctx:       context.Background(),
 		config:    conf,
 		db:        db,
@@ -143,6 +145,9 @@ func New(
 		help:      help.New(),
 		spinner:   spin,
 	}
+
+	m.commandPalette = NewCommandPalette(m.commands())
+	return m
 }
 
 func newContentPanel(keys config.KeyMap) viewport.Model {
@@ -197,6 +202,10 @@ type errorFlashMsg struct {
 
 type flakeMetadataMsg struct {
 	meta nix.FlakeMetadata
+}
+
+type textDisplayMsg struct {
+	text string
 }
 
 func (m Model) Init() tea.Cmd {
@@ -296,6 +305,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		if m.commandPalette != nil && m.commandPalette.IsVisible() {
+			selected, cmd := m.commandPalette.Update(msg)
+			if selected != nil {
+				return m, selected.Execute(&m)
+			}
+			return m, cmd
+		}
+
 		if msg.String() == "ctrl+c" {
 			m.withVisibleRunner(func(r *runner.Model) {
 				r.Cancel()
@@ -314,6 +331,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.keys.NextTab):
 			return m, m.handleNextTabKey()
+
+		case key.Matches(msg, m.keys.CommandPalette):
+			return m, m.commandPalette.Show()
 
 		case key.Matches(msg, m.keys.Deploy):
 			return m, m.hostDeployCmd(m.selectedHost)
@@ -416,6 +436,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case flakeMetadataMsg:
 		return m, m.handleFlakeMetadataMsg(msg)
+
+	case textDisplayMsg:
+		m.viewMode = viewModeText
+		m.text = msg.text
+		return m, nil
 
 	case *tea.Program:
 		m.program = msg
@@ -832,6 +857,10 @@ func (m Model) View() tea.View {
 		content = m.inputOverlay.Overlay(content, m.sizes.screen.width, m.sizes.screen.height)
 	}
 
+	if m.commandPalette != nil && m.commandPalette.IsVisible() {
+		content = m.commandPalette.Overlay(content, m.sizes.screen.width, m.sizes.screen.height)
+	}
+
 	v := tea.NewView(content)
 	v.AltScreen = true
 	return v
@@ -913,6 +942,75 @@ func errorFlashCmd(format string, a ...any) tea.Cmd {
 		return errorFlashMsg{
 			text: text,
 		}
+	}
+}
+
+func (m *Model) commands() []Command {
+	return []Command{
+		{
+			Name:        "fingerprints",
+			Description: "List stored flake fingerprints",
+			Execute:     (*Model).cmdListFingerprints,
+		},
+		{
+			Name:        "hosts",
+			Description: "List configured hosts",
+			Execute:     (*Model).cmdListHosts,
+		},
+	}
+}
+
+func (m *Model) cmdListFingerprints() tea.Cmd {
+	return func() tea.Msg {
+		versions, err := m.db.ListFlakeVersions()
+		if err != nil {
+			slog.Error("Failed to list flake versions", "err", err)
+			return criticalErrorMsg{detail: "Failed to list flake versions: " + err.Error()}
+		}
+
+		if len(versions) == 0 {
+			return textDisplayMsg{text: "No flake fingerprints stored."}
+		}
+
+		var b strings.Builder
+		b.WriteString("Stored Flake Fingerprints\n\n")
+
+		for _, v := range versions {
+			dirty := ""
+			if v.Dirty {
+				dirty = " (dirty)"
+			}
+			fmt.Fprintf(&b, "  %s%s\n", v.Fingerprint, dirty)
+			fmt.Fprintf(&b, "    Revision: %s\n", v.Revision)
+			fmt.Fprintf(&b, "    Last Modified: %s\n", v.LastModified.Format("2006-01-02 15:04:05"))
+			fmt.Fprintf(&b, "    Stored At: %s\n\n", v.StoredAt.Format("2006-01-02 15:04:05"))
+		}
+
+		return textDisplayMsg{text: b.String()}
+	}
+}
+
+func (m *Model) cmdListHosts() tea.Cmd {
+	return func() tea.Msg {
+		var b strings.Builder
+		b.WriteString("Configured Hosts\n\n")
+
+		names := make([]string, 0, len(m.hosts))
+		for name := range m.hosts {
+			names = append(names, name)
+		}
+		slices.Sort(names)
+
+		for _, name := range names {
+			host := m.hosts[name]
+			line := "  " + name
+			if host.target != nil {
+				line += subtleStyle.Render(" → " + host.target.DeployHost)
+			}
+			b.WriteString(line + "\n")
+		}
+
+		return textDisplayMsg{text: b.String()}
 	}
 }
 

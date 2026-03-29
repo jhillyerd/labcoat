@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jhillyerd/labcoat/internal/nix"
@@ -140,6 +141,39 @@ func (b *BoltDB) StoreFlakeVersion(meta nix.FlakeMetadata) error {
 
 		return bucket.Put(key, data)
 	})
+}
+
+func (b *BoltDB) ListFlakeVersions() ([]FlakeVersion, error) {
+	var versions []FlakeVersion
+
+	err := b.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(flakeVersions))
+		if bucket == nil {
+			return fmt.Errorf("Failed to get %q bucket, was nil", flakeVersions)
+		}
+
+		c := bucket.Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			var fv FlakeVersion
+			if err := json.Unmarshal(v, &fv); err != nil {
+				return fmt.Errorf("Failed to unmarshal flake version: %w", err)
+			}
+			versions = append(versions, fv)
+		}
+
+		return nil
+	})
+
+	slices.SortFunc(versions, func(a, b FlakeVersion) int {
+		if a.StoredAt.After(b.StoredAt) {
+			return -1
+		} else if a.StoredAt.Before(b.StoredAt) {
+			return 1
+		}
+		return 0
+	})
+
+	return versions, err
 }
 
 func (b *BoltDB) GetFlakeVersion(fingerprint string) (*FlakeVersion, error) {
