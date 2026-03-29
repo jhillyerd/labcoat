@@ -18,6 +18,7 @@ type KeyMap struct {
 	Pager      key.Binding
 
 	// Commands.
+	CommandPalette   key.Binding
 	Deploy           key.Binding
 	Help             key.Binding
 	Reboot           key.Binding
@@ -32,7 +33,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Left, k.Right, k.ScrollUp, k.ScrollDown, k.Jump, k.Filter},
 		{k.Status, k.Deploy, k.SSHInto, k.RunCommandPrompt, k.Reboot},
-		{k.Pager, k.Quit, k.Help},
+		{k.CommandPalette, k.Pager, k.Quit, k.Help},
 	}
 }
 
@@ -41,7 +42,7 @@ func (k KeyMap) ShortHelp() []key.Binding {
 	return []key.Binding{
 		k.Up, k.Down, k.NextTab,
 		k.Status, k.Deploy, k.SSHInto, k.RunCommandPrompt, k.Reboot,
-		k.Help,
+		k.CommandPalette, k.Help,
 	}
 }
 
@@ -87,6 +88,10 @@ var DefaultKeyMap = KeyMap{
 		key.WithHelp("p", "open pager"),
 	),
 
+	CommandPalette: key.NewBinding(
+		key.WithKeys(":"),
+		key.WithHelp(":", "command palette"),
+	),
 	Deploy: key.NewBinding(
 		key.WithKeys("d"),
 		key.WithHelp("d", "deploy"),
