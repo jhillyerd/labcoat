@@ -80,11 +80,11 @@ const (
 )
 
 type hostModel struct {
-	name    string
-	target  *nix.TargetInfo // Cached info about target host.
-	hostTab int             // Currently visible host tab.
-	sshState sshCheckState // Current state of SSH pre-flight connectivity check.
-	deploy  struct {
+	name     string
+	target   *nix.TargetInfo // Cached info about target host.
+	hostTab  int             // Currently visible host tab.
+	sshState sshCheckState   // Current state of SSH pre-flight connectivity check.
+	deploy   struct {
 		intro        string // Rendered intro text: command, host, etc.
 		contentPanel viewport.Model
 		runner       *runner.Model
@@ -657,7 +657,7 @@ func (m *Model) hostSSHCheckCmd(host *hostModel) tea.Cmd {
 	// Show the user we're checking connectivity.
 	intro := lipgloss.NewStyle().
 		Foreground(subtleColor).
-		Render("Checking SSH connectivity to " + host.target.DeployHost + "...") + "\n"
+		Render("Checking SSH connectivity to "+host.target.DeployHost+"...") + "\n"
 	host.status.contentPanel.SetContent(intro)
 
 	user := host.target.DeployUser

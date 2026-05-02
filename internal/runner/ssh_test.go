@@ -88,4 +88,3 @@ func TestClassifySSHErrorSSHNotFoundSuggestion(t *testing.T) {
 	assert.Equal(t, "SSH command not found", err.Message)
 	assert.Contains(t, err.Suggestion, "ssh")
 }
-
