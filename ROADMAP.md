@@ -4,10 +4,10 @@
 
 | # | Item | Rationale |
 |---|------|-----------|
-| 1.1 | **Fix SSH trust lockup (#34)** | UI freeze is a showstopper; needs detection of untrusted hosts and a graceful error dialog instead of blocking on an SSH password prompt. May also need to audit `SSH_AUTH_SOCK` handling. |
+| 1.1 | ~~**Fix SSH trust lockup (#34)**~~ | ✅ Done — SSH pre-flight check with inline diagnostics, in-flight guard, and exec error classification. |
 | 1.2 | **Persist deployment history per host** | Building on the flake fingerprinting from #38, record each deployment (timestamp, fingerprint, success/failure) per host in BoltDB so we can later compare against target state and support rollback.
 | 1.3 | **Ping-based reboot tracking** | Half-finished feature in README checklist. After issuing a reboot, poll with `ping` / `ssh` to detect when the host comes back, then auto-refresh status. |
-| 1.4 | **Better error surfacing** | Extend modal dialogs to cover runner failures, SSH errors, flake parse errors, etc. so the user never needs to check a separate log. |
+| 1.4 | **Better error surfacing** | Extend modal dialogs to cover runner failures, flake parse errors, etc. so the user never needs to check a separate log. (SSH error surfacing done in #34.) |
 
 ## Phase 2 — Deployment Intelligence
 
