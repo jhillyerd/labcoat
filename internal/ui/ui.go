@@ -70,10 +70,20 @@ type Model struct {
 	cmdHistory     []string
 }
 
+type sshCheckState int
+
+const (
+	sshCheckNone    sshCheckState = iota // Not yet attempted.
+	sshCheckPending                      // In-flight.
+	sshCheckPassed                       // Reachable.
+	sshCheckFailed                       // Unreachable; user must retry.
+)
+
 type hostModel struct {
 	name    string
 	target  *nix.TargetInfo // Cached info about target host.
 	hostTab int             // Currently visible host tab.
+	sshState sshCheckState // Current state of SSH pre-flight connectivity check.
 	deploy  struct {
 		intro        string // Rendered intro text: command, host, etc.
 		contentPanel viewport.Model
@@ -190,6 +200,11 @@ type confirmationMsg struct {
 type textInputPromptMsg struct {
 	prompt   string
 	submitFn func(string) tea.Cmd
+}
+
+type hostSSHCheckMsg struct {
+	hostName string
+	err      error // nil on success, *runner.SSHCheckError on failure.
 }
 
 type criticalErrorMsg struct {
@@ -368,6 +383,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, m.keys.Status):
+			// Reset SSH check to allow re-checking on explicit status request.
+			if m.selectedHost != nil && m.selectedHost.sshState == sshCheckFailed {
+				m.selectedHost.sshState = sshCheckNone
+			}
 			return m, m.hostStatusCmd(m.selectedHost)
 
 		case key.Matches(msg, m.keys.SSHInto):
@@ -404,6 +423,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case hostRunCommandOutputMsg:
 		return m, m.handleHostRunCommandOutputMsg(msg)
+
+	case hostSSHCheckMsg:
+		return m, m.handleHostSSHCheckMsg(msg)
 
 	case hostStatusMsg:
 		return m, m.handleHostStatusMsg(msg)
@@ -554,6 +576,11 @@ func (m *Model) handleHostHoverMsg(msg hostHoverMsg) tea.Cmd {
 		return nil
 	}
 
+	if host.sshState == sshCheckFailed {
+		// SSH check previously failed; user must press `s` to retry.
+		return nil
+	}
+
 	return m.hostStatusCmd(host)
 }
 
@@ -612,8 +639,65 @@ func (m *Model) handleHostTargetInfoMsg(msg hostTargetInfoMsg) tea.Cmd {
 		host.target.DeployUser = m.config.Hosts.DefaultSSHUser
 	}
 
-	// Fetch host status now that we know target info.
-	return m.hostStatusCmd(host)
+	// Verify SSH connectivity before attempting status.
+	return m.hostSSHCheckCmd(host)
+}
+
+func (m *Model) hostSSHCheckCmd(host *hostModel) tea.Cmd {
+	if host.target == nil {
+		return nil
+	}
+
+	// Prevent duplicate in-flight checks.
+	if host.sshState == sshCheckPending {
+		return nil
+	}
+	host.sshState = sshCheckPending
+
+	// Show the user we're checking connectivity.
+	intro := lipgloss.NewStyle().
+		Foreground(subtleColor).
+		Render("Checking SSH connectivity to " + host.target.DeployHost + "...") + "\n"
+	host.status.contentPanel.SetContent(intro)
+
+	user := host.target.DeployUser
+	hostParam := host.target.DeployHost
+
+	return func() tea.Msg {
+		err := runner.CheckSSH(m.ctx, hostParam, user)
+		return hostSSHCheckMsg{hostName: host.name, err: err}
+	}
+}
+
+func (m *Model) handleHostSSHCheckMsg(msg hostSSHCheckMsg) tea.Cmd {
+	host := m.hosts[msg.hostName]
+	if msg.err == nil {
+		slog.Debug("SSH check passed", "host", msg.hostName)
+		host.sshState = sshCheckPassed
+
+		// Proceed with status collection.
+		return m.hostStatusCmd(host)
+	}
+
+	host.sshState = sshCheckFailed
+
+	checkErr, ok := msg.err.(*runner.SSHCheckError)
+	if !ok {
+		slog.Error("SSH check returned unexpected error type", "host", msg.hostName, "err", msg.err)
+		return func() tea.Msg {
+			return criticalErrorMsg{detail: "SSH check failed: " + msg.err.Error()}
+		}
+	}
+
+	slog.Warn("SSH check failed", "host", msg.hostName, "message", checkErr.Message)
+
+	// Show error in status panel.
+	detail := lipgloss.NewStyle().Foreground(errorColor).Render(checkErr.Message) +
+		"\n\n" + checkErr.Suggestion +
+		"\n\n" + subtleStyle.Render("Press `i` to connect interactively or `s` to retry after fixing.")
+	host.status.contentPanel.SetContent(detail)
+
+	return nil
 }
 
 func (m *Model) fetchFlakeMetadataCmd() tea.Cmd {
