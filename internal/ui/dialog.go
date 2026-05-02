@@ -1,11 +1,14 @@
 package ui
 
 import (
+	"fmt"
 	"image/color"
 
 	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/jhillyerd/labcoat/internal/config"
 )
 
 // Dialog is a reusable modal dialog that overlays content on top of a background.
@@ -35,6 +38,92 @@ func (d *Dialog) View() string {
 // Overlay renders the Dialog centered on top of the background content using
 // the lipgloss compositor for proper layering.
 func (d *Dialog) Overlay(background string, width, height int) string {
+	dialog := d.View()
+
+	bgLayer := lipgloss.NewLayer(background)
+	dialogLayer := lipgloss.NewLayer(dialog)
+
+	dialogW := lipgloss.Width(dialog)
+	dialogH := lipgloss.Height(dialog)
+	centerX := (width - dialogW) / 2
+	centerY := (height - dialogH) / 2
+
+	dialogLayer.X(centerX).Y(centerY).Z(1)
+
+	compositor := lipgloss.NewCompositor(bgLayer, dialogLayer)
+	return compositor.Render()
+}
+
+// ScrollableDialog is a modal dialog with a scrollable viewport for displaying
+// long text content. It supports PgUp/PgDn for scrolling and Esc to dismiss.
+type ScrollableDialog struct {
+	viewport    viewport.Model
+	borderColor color.Color
+	keys        config.KeyMap
+}
+
+const scrollableDialogPadding = 0
+const scrollableDialogBorder = 2 // 1 per side
+
+// NewScrollableDialog creates a scrollable dialog sized to fit within the
+// given screen dimensions, displaying the provided content.
+func NewScrollableDialog(content string, borderColor color.Color, screenW, screenH int, keys config.KeyMap) *ScrollableDialog {
+	// Dialog occupies 80% of screen, max 120 wide, centered.
+	w := min(120, screenW*80/100)
+	h := min(screenH-4, screenH*80/100)
+
+	// Inner viewport dimensions minus padding and border.
+	vpW := w - 2*scrollableDialogPadding - scrollableDialogBorder
+	vpH := h - scrollableDialogBorder - 2 // blank line + footer hint
+
+	vp := viewport.New(viewport.WithWidth(vpW), viewport.WithHeight(vpH))
+	vp.KeyMap.PageUp = keys.ScrollUp
+	vp.KeyMap.PageDown = keys.ScrollDown
+	vp.SetContent(content)
+	vp.GotoTop()
+
+	return &ScrollableDialog{
+		viewport:    vp,
+		borderColor: borderColor,
+		keys:        keys,
+	}
+}
+
+// Update handles key events for scrolling. Returns true if the dialog should
+// be dismissed.
+func (d *ScrollableDialog) Update(msg tea.Msg) (dismiss bool, cmd tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		switch msg.String() {
+		case "esc", "enter":
+			return true, nil
+		}
+	}
+
+	d.viewport, cmd = d.viewport.Update(msg)
+	return false, cmd
+}
+
+// View renders the dialog content with border and hint.
+func (d *ScrollableDialog) View() string {
+	scroll := "(END)"
+	if !d.viewport.AtBottom() {
+		scroll = fmt.Sprintf("%.0f%%", d.viewport.ScrollPercent()*100)
+	}
+
+	hint := subtleStyle.Render(fmt.Sprintf("PgUp/PgDn: scroll • Esc: close • %s", scroll))
+	body := d.viewport.View() + "\n\n" + hint
+
+	style := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(d.borderColor).
+		Padding(0, 1)
+
+	return style.Render(body)
+}
+
+// Overlay renders the dialog centered on top of the background content.
+func (d *ScrollableDialog) Overlay(background string, width, height int) string {
 	dialog := d.View()
 
 	bgLayer := lipgloss.NewLayer(background)
