@@ -46,11 +46,12 @@ func CheckSSH(ctx context.Context, host string, user string) error {
 	}
 
 	output := strings.TrimSpace(stderr.String())
-	return classifySSHError(dest, output)
+	return classifySSHError(dest, output, err)
 }
 
 // classifySSHError maps raw SSH error output to a user-friendly SSHCheckError.
-func classifySSHError(dest string, output string) *SSHCheckError {
+// Falls back to execErr when stderr is empty (e.g. ssh not found, context deadline).
+func classifySSHError(dest string, output string, execErr error) *SSHCheckError {
 	e := &SSHCheckError{Dest: dest}
 
 	switch {
@@ -80,11 +81,26 @@ func classifySSHError(dest string, output string) *SSHCheckError {
 		e.Suggestion = "Check that the hostname is correct and DNS is working."
 
 	default:
-		e.Message = "SSH connection failed"
-		if output != "" {
-			e.Suggestion = output
+		// execErr may indicate the ssh binary is missing, context was cancelled, etc.
+		detail := output
+		if detail == "" && execErr != nil {
+			detail = execErr.Error()
+		}
+
+		if strings.Contains(detail, "executable file not found") {
+			e.Message = "SSH command not found"
+			e.Suggestion = "Ensure the `ssh` command is installed and in your PATH."
+		} else if strings.Contains(detail, "context deadline") ||
+			strings.Contains(detail, "signal: killed") {
+			e.Message = "SSH check timed out"
+			e.Suggestion = "The host may be unreachable. Check network connectivity and try again."
 		} else {
-			e.Suggestion = "Unknown error connecting via SSH."
+			e.Message = "SSH connection failed"
+			if detail != "" {
+				e.Suggestion = detail
+			} else {
+				e.Suggestion = "Unknown error connecting via SSH."
+			}
 		}
 	}
 

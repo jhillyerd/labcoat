@@ -74,6 +74,7 @@ type hostModel struct {
 	name    string
 	target  *nix.TargetInfo // Cached info about target host.
 	hostTab int             // Currently visible host tab.
+	sshChecking  bool       // Whether an SSH pre-flight check is currently in-flight.
 	sshChecked   bool       // Whether SSH connectivity has been verified.
 	sshReachable bool       // Whether the SSH connectivity check passed.
 	deploy  struct {
@@ -378,6 +379,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Reset SSH check to allow re-checking on explicit status request.
 			if m.selectedHost != nil && !m.selectedHost.sshReachable {
 				m.selectedHost.sshChecked = false
+				m.selectedHost.sshChecking = false
 			}
 			return m, m.hostStatusCmd(m.selectedHost)
 
@@ -640,6 +642,12 @@ func (m *Model) hostSSHCheckCmd(host *hostModel) tea.Cmd {
 		return nil
 	}
 
+	// Prevent duplicate in-flight checks.
+	if host.sshChecking {
+		return nil
+	}
+	host.sshChecking = true
+
 	// Show the user we're checking connectivity.
 	intro := lipgloss.NewStyle().
 		Foreground(subtleColor).
@@ -657,6 +665,7 @@ func (m *Model) hostSSHCheckCmd(host *hostModel) tea.Cmd {
 
 func (m *Model) handleHostSSHCheckMsg(msg hostSSHCheckMsg) tea.Cmd {
 	host := m.hosts[msg.hostName]
+	host.sshChecking = false
 	host.sshChecked = true
 
 	if msg.err == nil {
