@@ -72,21 +72,48 @@ func NewScrollableDialog(content string, borderColor color.Color, screenW, scree
 	w := min(120, screenW*80/100)
 	h := min(screenH-4, screenH*80/100)
 
-	// Inner viewport dimensions minus padding and border.
-	vpW := w - 2*scrollableDialogPadding - scrollableDialogBorder
-	vpH := h - scrollableDialogBorder - 2 // blank line + footer hint
-
-	vp := viewport.New(viewport.WithWidth(vpW), viewport.WithHeight(vpH))
-	vp.KeyMap.PageUp = keys.ScrollUp
-	vp.KeyMap.PageDown = keys.ScrollDown
-	vp.SetContent(content)
-	vp.GotoTop()
-
-	return &ScrollableDialog{
-		viewport:    vp,
+	d := &ScrollableDialog{
 		borderColor: borderColor,
 		keys:        keys,
 	}
+	d.initViewport(content, w, h)
+	return d
+}
+
+func (d *ScrollableDialog) initViewport(content string, w, h int) {
+	// Clamp to minimum usable dimensions.
+	w = max(w, 20)
+	h = max(h, 6)
+
+	// Inner viewport dimensions minus border and footer.
+	vpW := w - 2*scrollableDialogPadding - scrollableDialogBorder
+	vpH := h - scrollableDialogBorder - 2 // blank line + footer hint
+	vpW = max(vpW, 10)
+	vpH = max(vpH, 3)
+
+	vp := viewport.New(viewport.WithWidth(vpW), viewport.WithHeight(vpH))
+	vp.KeyMap.PageUp = d.keys.ScrollUp
+	vp.KeyMap.PageDown = d.keys.ScrollDown
+	vp.SetContent(content)
+	vp.GotoTop()
+	d.viewport = vp
+}
+
+// Resize updates the dialog dimensions to fit new screen size.
+func (d *ScrollableDialog) Resize(screenW, screenH int) {
+	w := min(120, screenW*80/100)
+	h := min(screenH-4, screenH*80/100)
+
+	w = max(w, 20)
+	h = max(h, 6)
+
+	vpW := w - 2*scrollableDialogPadding - scrollableDialogBorder
+	vpH := h - scrollableDialogBorder - 2
+	vpW = max(vpW, 10)
+	vpH = max(vpH, 3)
+
+	d.viewport.SetWidth(vpW)
+	d.viewport.SetHeight(vpH)
 }
 
 // Update handles key events for scrolling. Returns true if the dialog should
@@ -111,7 +138,7 @@ func (d *ScrollableDialog) View() string {
 		scroll = fmt.Sprintf("%.0f%%", d.viewport.ScrollPercent()*100)
 	}
 
-	hint := subtleStyle.Render(fmt.Sprintf("PgUp/PgDn: scroll • Esc: close • %s", scroll))
+	hint := subtleStyle.Render(fmt.Sprintf("PgUp/PgDn: scroll • Esc/Enter: close • %s", scroll))
 	body := d.viewport.View() + "\n\n" + hint
 
 	style := lipgloss.NewStyle().

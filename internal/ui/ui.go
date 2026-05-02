@@ -449,6 +449,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.hostList.SetSize(m.sizes.hostList.width, m.sizes.hostList.height)
 		m.updateContentPanel()
 
+		if m.textDialog != nil {
+			m.textDialog.Resize(m.sizes.screen.width, m.sizes.screen.height)
+		}
+
 		return m, nil
 
 	case confirmationMsg:
