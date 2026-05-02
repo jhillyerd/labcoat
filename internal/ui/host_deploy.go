@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/jhillyerd/labcoat/internal/runner"
+	"github.com/jhillyerd/labcoat/internal/store"
 )
 
 type hostDeployMsg struct {
@@ -73,7 +75,11 @@ func (m *Model) handleHostDeployMsg(msg hostDeployMsg) tea.Cmd {
 	host.deploy.intro = intro
 	host.deploy.contentPanel.SetContent(intro)
 
-	logCmd := m.hostLogCmd(host, fmt.Sprintf("NixOS deployment started, target: %s", targetHost))
+	logText := fmt.Sprintf("NixOS deployment started, target: %s", targetHost)
+	if m.flakeFingerprint != "" {
+		logText += fmt.Sprintf(", fingerprint: %s", shortFingerprint(m.flakeFingerprint))
+	}
+	logCmd := m.hostLogCmd(host, logText)
 	busyCmd := hostListIncrBusyCmd(host.name)
 	return tea.Batch(srunner.Init(m.program), logCmd, busyCmd)
 }
@@ -89,13 +95,33 @@ func (m *Model) handleHostDeployOutputMsg(msg hostDeployOutputMsg) tea.Cmd {
 	}
 
 	if msg.final {
+		success := srunner.Successful()
+
+		// Persist deployment record.
+		if m.flakeFingerprint != "" {
+			record := store.DeploymentRecord{
+				Timestamp:   time.Now(),
+				Fingerprint: m.flakeFingerprint,
+				Success:     success,
+			}
+			if err := m.db.RecordDeployment(host.name, record); err != nil {
+				slog.Error("Failed to record deployment", "host", host.name, "err", err)
+			}
+		} else {
+			slog.Warn("No flake fingerprint available, skipping deployment record", "host", host.name)
+		}
+
 		// Log completion.
+		logText := fmt.Sprintf("NixOS deployment finished: %s", srunner.StateString())
+		if m.flakeFingerprint != "" {
+			logText += fmt.Sprintf(", fingerprint: %s", shortFingerprint(m.flakeFingerprint))
+		}
 		logCmd := m.hostLogCmd(
 			msg.host,
-			fmt.Sprintf("NixOS deployment finished: %s", srunner.StateString()))
+			logText)
 
 		status := hostItemStatusSuccess
-		if !srunner.Successful() {
+		if !success {
 			status = hostItemStatusFailed
 		}
 		busyCmd := hostListDecrBusyCmd(host.name, status)

@@ -42,32 +42,33 @@ const (
 var hostTabNames = []string{"Host Status", "Deploy", "Run Command", "Op Log"}
 
 type Model struct {
-	ctx            context.Context
-	program        *tea.Program
-	db             *store.BoltDB
-	config         config.Config
-	ready          bool // true once screen size is known.
-	viewMode       int  // Current UI mode.
-	flakePath      string
-	hostList       hostListModel
-	hosts          map[string]*hostModel
-	selectedHost   *hostModel
-	hoverTimerID   uint64 // Unique ID for each host hover timer.
-	nixPool        *npool.Pool
-	contentPanel   *viewport.Model
-	sizes          layoutSizes
-	keys           config.KeyMap
-	help           help.Model
-	spinner        spinner.Model
-	jumpToLetter   bool
-	confirmation   *confirmationMsg
-	commandPalette *CommandPalette
-	inputOverlay   *InputOverlay
-	textDialog     *ScrollableDialog
-	error          string
-	flashText      string
-	flashTimer     *time.Timer
-	cmdHistory     []string
+	ctx              context.Context
+	program          *tea.Program
+	db               *store.BoltDB
+	config           config.Config
+	ready            bool // true once screen size is known.
+	viewMode         int  // Current UI mode.
+	flakePath        string
+	flakeFingerprint string // Current flake fingerprint, updated by metadata fetch.
+	hostList         hostListModel
+	hosts            map[string]*hostModel
+	selectedHost     *hostModel
+	hoverTimerID     uint64 // Unique ID for each host hover timer.
+	nixPool          *npool.Pool
+	contentPanel     *viewport.Model
+	sizes            layoutSizes
+	keys             config.KeyMap
+	help             help.Model
+	spinner          spinner.Model
+	jumpToLetter     bool
+	confirmation     *confirmationMsg
+	commandPalette   *CommandPalette
+	inputOverlay     *InputOverlay
+	textDialog       *ScrollableDialog
+	error            string
+	flashText        string
+	flashTimer       *time.Timer
+	cmdHistory       []string
 }
 
 type sshCheckState int
@@ -743,6 +744,7 @@ func (m *Model) fetchFlakeMetadataCmd() tea.Cmd {
 }
 
 func (m *Model) handleFlakeMetadataMsg(msg flakeMetadataMsg) tea.Cmd {
+	m.flakeFingerprint = msg.meta.Fingerprint
 	if err := m.db.StoreFlakeVersion(msg.meta); err != nil {
 		slog.Error("Failed to store flake version", "err", err)
 	}
@@ -1054,6 +1056,11 @@ func errorFlashCmd(format string, a ...any) tea.Cmd {
 func (m *Model) commands() []Command {
 	return []Command{
 		{
+			Name:        "deployments",
+			Description: "List deployment history for selected host",
+			Execute:     (*Model).cmdListDeployments,
+		},
+		{
 			Name:        "fingerprints",
 			Description: "List stored flake fingerprints",
 			Execute:     (*Model).cmdListFingerprints,
@@ -1063,6 +1070,44 @@ func (m *Model) commands() []Command {
 			Description: "List configured hosts",
 			Execute:     (*Model).cmdListHosts,
 		},
+	}
+}
+
+func (m *Model) cmdListDeployments() tea.Cmd {
+	host := m.selectedHost
+	if host == nil {
+		return func() tea.Msg {
+			return textDisplayMsg{text: "No host selected."}
+		}
+	}
+	hostName := host.name
+
+	return func() tea.Msg {
+		records, err := m.db.ListDeployments(hostName)
+		if err != nil {
+			slog.Error("Failed to list deployments", "err", err, "host", hostName)
+			return criticalErrorMsg{detail: "Failed to list deployments: " + err.Error()}
+		}
+
+		if len(records) == 0 {
+			return textDisplayMsg{text: fmt.Sprintf("No deployment history for %q.", hostName)}
+		}
+
+		var b strings.Builder
+		fmt.Fprintf(&b, "Deployment History for %q\n\n", hostName)
+
+		for _, r := range records {
+			status := renderedStatusFailed
+			if r.Success {
+				status = renderedStatusSuccess
+			}
+			fmt.Fprintf(&b, "  %s %s  %s\n",
+				subtleStyle.Render(r.Timestamp.Format(time.DateTime)),
+				status,
+				shortFingerprint(r.Fingerprint))
+		}
+
+		return textDisplayMsg{text: b.String()}
 	}
 }
 
@@ -1141,6 +1186,14 @@ func tabBorderWithBottom(left, middle, right string) lipgloss.Border {
 	border.Bottom = middle
 	border.BottomRight = right
 	return border
+}
+
+// shortFingerprint returns the first 12 chars of a fingerprint for display.
+func shortFingerprint(fp string) string {
+	if len(fp) > 12 {
+		return fp[:12]
+	}
+	return fp
 }
 
 func tabSuffixBorder() lipgloss.Border {
