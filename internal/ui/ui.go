@@ -63,7 +63,7 @@ type Model struct {
 	confirmation   *confirmationMsg
 	commandPalette *CommandPalette
 	inputOverlay   *InputOverlay
-	text           string
+	textDialog     *ScrollableDialog
 	error          string
 	flashText      string
 	flashTimer     *time.Timer
@@ -249,10 +249,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.viewMode == viewModeText {
-			// Any key to continue.
+			if m.textDialog != nil {
+				dismiss, cmd := m.textDialog.Update(msg)
+				if dismiss {
+					m.viewMode = viewModeHosts
+					m.textDialog = nil
+				}
+				return m, cmd
+			}
+			// Fallback: dismiss on any key if no dialog.
 			m.viewMode = viewModeHosts
-			m.text = ""
-
 			return m, nil
 		}
 
@@ -393,11 +399,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.startHostInteractiveSSH()
 
 		case key.Matches(msg, m.keys.Help):
-			m.viewMode = viewModeText
-			m.text = labelStyle.Render("Help") +
-				"\n\n" +
-				m.help.FullHelpView(m.keys.FullHelp())
-			return m, nil
+			return m, func() tea.Msg {
+				return textDisplayMsg{
+					text: labelStyle.Render("Help") +
+						"\n\n" +
+						m.help.FullHelpView(m.keys.FullHelp()),
+				}
+			}
 
 		case key.Matches(msg, m.keys.Quit):
 			return m, tea.Quit
@@ -441,6 +449,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.hostList.SetSize(m.sizes.hostList.width, m.sizes.hostList.height)
 		m.updateContentPanel()
 
+		if m.textDialog != nil {
+			m.textDialog.Resize(m.sizes.screen.width, m.sizes.screen.height)
+		}
+
 		return m, nil
 
 	case confirmationMsg:
@@ -466,7 +478,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case textDisplayMsg:
 		m.viewMode = viewModeText
-		m.text = msg.text
+		m.textDialog = NewScrollableDialog(
+			msg.text, lipgloss.Color("#7dcfff"),
+			m.sizes.screen.width, m.sizes.screen.height,
+			m.keys)
 		return m, nil
 
 	case *tea.Program:
@@ -928,9 +943,9 @@ func (m Model) View() tea.View {
 
 	switch m.viewMode {
 	case viewModeText:
-		dialogContent := m.text + "\n\n" + subtleStyle.Render("[Press any key to continue]")
-		dialog := NewDialog(dialogContent, lipgloss.Color("#7dcfff"))
-		content = dialog.Overlay(content, m.sizes.screen.width, m.sizes.screen.height)
+		if m.textDialog != nil {
+			content = m.textDialog.Overlay(content, m.sizes.screen.width, m.sizes.screen.height)
+		}
 
 	case viewModeError:
 		dialogContent := labelStyle.Render("Critical Error") +
