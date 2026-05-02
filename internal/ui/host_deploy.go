@@ -58,6 +58,10 @@ func (m *Model) handleHostDeployMsg(msg hostDeployMsg) tea.Cmd {
 	srunner := runner.NewLocal(ctx, onUpdate, m.flakePath, "nixos-rebuild", args...)
 	srunner.PassEnv("HOME", "PATH", "SSH_AUTH_SOCK", "SSH_TTY")
 
+	// Prevent nixos-rebuild's internal SSH from prompting for host keys or
+	// passwords, which would freeze the TUI. Failures are shown inline.
+	srunner.SetEnv("NIX_SSHOPTS", "-oBatchMode=yes")
+
 	srunner.Styles.StatusSuffix = subtleStyle
 	host.deploy.runner = srunner
 	host.deploy.cancel = cancel

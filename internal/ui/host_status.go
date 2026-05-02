@@ -21,6 +21,17 @@ func (m *Model) hostStatusCmd(host *hostModel) tea.Cmd {
 
 	m.setVisibleHostTab(hostTabStatus)
 
+	// Run SSH pre-flight check if not yet verified.
+	if !host.sshChecked {
+		return m.hostSSHCheckCmd(host)
+	}
+
+	// If SSH check failed, don't attempt status (user must press `s` to retry).
+	if !host.sshReachable {
+		slog.Debug("hostStatusCmd: SSH not reachable, skipping", "host", host.name)
+		return nil
+	}
+
 	// Do nothing if status job is already running.
 	srunner := m.selectedHost.status.runner
 	if srunner != nil && srunner.Running() {
