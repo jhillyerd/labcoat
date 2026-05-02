@@ -70,13 +70,20 @@ type Model struct {
 	cmdHistory     []string
 }
 
+type sshCheckState int
+
+const (
+	sshCheckNone    sshCheckState = iota // Not yet attempted.
+	sshCheckPending                      // In-flight.
+	sshCheckPassed                       // Reachable.
+	sshCheckFailed                       // Unreachable; user must retry.
+)
+
 type hostModel struct {
 	name    string
 	target  *nix.TargetInfo // Cached info about target host.
 	hostTab int             // Currently visible host tab.
-	sshChecking  bool       // Whether an SSH pre-flight check is currently in-flight.
-	sshChecked   bool       // Whether SSH connectivity has been verified.
-	sshReachable bool       // Whether the SSH connectivity check passed.
+	sshState sshCheckState // Current state of SSH pre-flight connectivity check.
 	deploy  struct {
 		intro        string // Rendered intro text: command, host, etc.
 		contentPanel viewport.Model
@@ -377,9 +384,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.keys.Status):
 			// Reset SSH check to allow re-checking on explicit status request.
-			if m.selectedHost != nil && !m.selectedHost.sshReachable {
-				m.selectedHost.sshChecked = false
-				m.selectedHost.sshChecking = false
+			if m.selectedHost != nil && m.selectedHost.sshState == sshCheckFailed {
+				m.selectedHost.sshState = sshCheckNone
 			}
 			return m, m.hostStatusCmd(m.selectedHost)
 
@@ -570,7 +576,7 @@ func (m *Model) handleHostHoverMsg(msg hostHoverMsg) tea.Cmd {
 		return nil
 	}
 
-	if host.sshChecked && !host.sshReachable {
+	if host.sshState == sshCheckFailed {
 		// SSH check previously failed; user must press `s` to retry.
 		return nil
 	}
@@ -643,10 +649,10 @@ func (m *Model) hostSSHCheckCmd(host *hostModel) tea.Cmd {
 	}
 
 	// Prevent duplicate in-flight checks.
-	if host.sshChecking {
+	if host.sshState == sshCheckPending {
 		return nil
 	}
-	host.sshChecking = true
+	host.sshState = sshCheckPending
 
 	// Show the user we're checking connectivity.
 	intro := lipgloss.NewStyle().
@@ -665,18 +671,15 @@ func (m *Model) hostSSHCheckCmd(host *hostModel) tea.Cmd {
 
 func (m *Model) handleHostSSHCheckMsg(msg hostSSHCheckMsg) tea.Cmd {
 	host := m.hosts[msg.hostName]
-	host.sshChecking = false
-	host.sshChecked = true
-
 	if msg.err == nil {
 		slog.Debug("SSH check passed", "host", msg.hostName)
-		host.sshReachable = true
+		host.sshState = sshCheckPassed
 
 		// Proceed with status collection.
 		return m.hostStatusCmd(host)
 	}
 
-	host.sshReachable = false
+	host.sshState = sshCheckFailed
 
 	checkErr, ok := msg.err.(*runner.SSHCheckError)
 	if !ok {
