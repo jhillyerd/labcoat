@@ -30,6 +30,8 @@ you will be better served by a parallel deployment tool such as [Colmena].
   - [ ] Flag out-of-date hosts in list UI
 - [x] External pager support
 
+See the [Roadmap](ROADMAP.md) for a more complete list of planned features and
+improvements.
 
 ## Status
 
