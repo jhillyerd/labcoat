@@ -376,7 +376,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.keys.Status):
 			// Reset SSH check to allow re-checking on explicit status request.
-			if m.selectedHost != nil {
+			if m.selectedHost != nil && !m.selectedHost.sshReachable {
 				m.selectedHost.sshChecked = false
 			}
 			return m, m.hostStatusCmd(m.selectedHost)
