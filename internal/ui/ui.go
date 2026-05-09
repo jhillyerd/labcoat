@@ -1153,11 +1153,19 @@ func (m *Model) cmdListHosts() tea.Cmd {
 		slices.Sort(names)
 
 		for _, name := range names {
-			host := m.hosts[name]
 			line := "  " + name
-			if host.target != nil {
-				line += subtleStyle.Render(" → " + host.target.DeployHost)
+
+			// Show lastModified date from latest deployed fingerprint.
+			if deploy, err := m.db.LatestDeployment(name); err != nil {
+				slog.Error("Failed to query latest deployment", "host", name, "err", err)
+			} else if deploy != nil {
+				if ver, err := m.db.GetFlakeVersion(deploy.Fingerprint); err != nil {
+					slog.Error("Failed to query flake version", "host", name, "err", err)
+				} else if ver != nil {
+					line += subtleStyle.Render(" deployed revision " + ver.LastModified.Format(time.DateOnly))
+				}
 			}
+
 			b.WriteString(line + "\n")
 		}
 
