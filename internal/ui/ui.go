@@ -231,6 +231,7 @@ func (m Model) Init() tea.Cmd {
 		m.hostList.Init(),
 		m.spinner.Tick,
 		m.fetchFlakeMetadataCmd(),
+		m.fetchAllHostsBehindCmd(),
 	)
 }
 
@@ -748,9 +749,12 @@ func (m *Model) handleFlakeMetadataMsg(msg flakeMetadataMsg) tea.Cmd {
 	if err := m.db.StoreFlakeVersion(msg.meta); err != nil {
 		slog.Error("Failed to store flake version", "err", err)
 	}
-	return tea.Tick(time.Minute, func(time.Time) tea.Msg {
-		return flakeMetadataTickMsg{}
-	})
+	return tea.Batch(
+		tea.Tick(time.Minute, func(time.Time) tea.Msg {
+			return flakeMetadataTickMsg{}
+		}),
+		m.fetchAllHostsBehindCmd(),
+	)
 }
 
 func (m *Model) handleOpenPagerMsg(_ openPagerMsg) tea.Cmd {
@@ -1185,6 +1189,31 @@ func (m *Model) addToCmdHistory(cmd string) {
 	m.cmdHistory = append(m.cmdHistory, cmd)
 	if len(m.cmdHistory) > maxCmdHistory {
 		m.cmdHistory = m.cmdHistory[len(m.cmdHistory)-maxCmdHistory:]
+	}
+}
+
+// fetchAllHostsBehindCmd returns a command that computes how many clean commits
+// behind the latest each host's most recent deployment is.
+func (m *Model) fetchAllHostsBehindCmd() tea.Cmd {
+	hostNames := make([]string, 0, len(m.hosts))
+	for name := range m.hosts {
+		hostNames = append(hostNames, name)
+	}
+	db := m.db
+
+	return func() tea.Msg {
+		storeInfo, err := db.HostsCommitsBehind(hostNames)
+		if err != nil {
+			slog.Error("Failed to compute hosts commits behind", "err", err)
+			return nil
+		}
+
+		counts := make(map[string]behindInfo, len(storeInfo))
+		for name, si := range storeInfo {
+			counts[name] = behindInfo{behind: si.Behind, dirty: si.Dirty}
+		}
+
+		return hostsBehindMsg{counts: counts}
 	}
 }
 

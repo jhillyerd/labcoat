@@ -126,7 +126,7 @@ func (m *Model) handleHostDeployOutputMsg(msg hostDeployOutputMsg) tea.Cmd {
 		}
 		busyCmd := hostListDecrBusyCmd(host.name, status)
 
-		cmds = append(cmds, logCmd, busyCmd)
+		cmds = append(cmds, logCmd, busyCmd, m.fetchAllHostsBehindCmd())
 	} else {
 		// Schedule next update.
 		_, updateCmd := srunner.Update(nil)

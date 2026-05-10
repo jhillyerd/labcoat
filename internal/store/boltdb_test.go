@@ -1,7 +1,6 @@
 package store
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -199,5 +198,159 @@ func TestWriteAndReadHostLogs(t *testing.T) {
 	assert.Equal(t, "entry 2", entries[1].Entry)
 }
 
-// Silence unused import warning for os.
-var _ = os.DevNull
+// --- HostsCommitsBehind tests ---
+
+func storeTestFlakeVersion(t *testing.T, bdb *BoltDB, fv FlakeVersion) {
+	t.Helper()
+	err := bdb.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(flakeVersions))
+		data, err := msgpack.Marshal(fv)
+		require.NoError(t, err)
+		return bucket.Put([]byte(fv.Fingerprint), data)
+	})
+	require.NoError(t, err)
+}
+
+func TestHostsCommitsBehindNoDeployments(t *testing.T) {
+	bdb := setupTestDB(t)
+
+	result, err := bdb.HostsCommitsBehind([]string{"host-a"})
+	require.NoError(t, err)
+	assert.Empty(t, result)
+}
+
+func TestHostsCommitsBehindUpToDate(t *testing.T) {
+	bdb := setupTestDB(t)
+
+	storeTestFlakeVersion(t, bdb, FlakeVersion{
+		Fingerprint: "fp1",
+		Dirty:       false,
+		StoredAt:    time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
+	})
+
+	err := bdb.RecordDeployment("host-a", DeploymentRecord{
+		Timestamp:   time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
+		Fingerprint: "fp1",
+		Success:     true,
+	})
+	require.NoError(t, err)
+
+	result, err := bdb.HostsCommitsBehind([]string{"host-a"})
+	require.NoError(t, err)
+	assert.Equal(t, CommitsBehindInfo{Behind: 0, Dirty: false}, result["host-a"])
+}
+
+func TestHostsCommitsBehindThreeCommitsBehind(t *testing.T) {
+	bdb := setupTestDB(t)
+
+	storeTestFlakeVersion(t, bdb, FlakeVersion{
+		Fingerprint: "fp-old",
+		Dirty:       false,
+		StoredAt:    time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
+	})
+	storeTestFlakeVersion(t, bdb, FlakeVersion{
+		Fingerprint: "fp-mid",
+		Dirty:       false,
+		StoredAt:    time.Date(2025, 6, 2, 0, 0, 0, 0, time.UTC),
+	})
+	storeTestFlakeVersion(t, bdb, FlakeVersion{
+		Fingerprint: "fp-dirty",
+		Dirty:       true,
+		StoredAt:    time.Date(2025, 6, 3, 0, 0, 0, 0, time.UTC),
+	})
+	storeTestFlakeVersion(t, bdb, FlakeVersion{
+		Fingerprint: "fp-new",
+		Dirty:       false,
+		StoredAt:    time.Date(2025, 6, 4, 0, 0, 0, 0, time.UTC),
+	})
+
+	err := bdb.RecordDeployment("host-a", DeploymentRecord{
+		Timestamp:   time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
+		Fingerprint: "fp-old",
+		Success:     true,
+	})
+	require.NoError(t, err)
+
+	result, err := bdb.HostsCommitsBehind([]string{"host-a"})
+	require.NoError(t, err)
+	// fp-mid and fp-new are clean versions after fp-old; fp-dirty is skipped.
+	assert.Equal(t, CommitsBehindInfo{Behind: 2, Dirty: false}, result["host-a"])
+}
+
+func TestHostsCommitsBehindDirtyDeploy(t *testing.T) {
+	bdb := setupTestDB(t)
+
+	storeTestFlakeVersion(t, bdb, FlakeVersion{
+		Fingerprint: "fp-dirty",
+		Dirty:       true,
+		StoredAt:    time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
+	})
+	storeTestFlakeVersion(t, bdb, FlakeVersion{
+		Fingerprint: "fp-clean",
+		Dirty:       false,
+		StoredAt:    time.Date(2025, 6, 2, 0, 0, 0, 0, time.UTC),
+	})
+
+	err := bdb.RecordDeployment("host-a", DeploymentRecord{
+		Timestamp:   time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
+		Fingerprint: "fp-dirty",
+		Success:     true,
+	})
+	require.NoError(t, err)
+
+	result, err := bdb.HostsCommitsBehind([]string{"host-a"})
+	require.NoError(t, err)
+	assert.Equal(t, CommitsBehindInfo{Behind: 1, Dirty: true}, result["host-a"])
+}
+
+func TestHostsCommitsBehindFingerprintNotStored(t *testing.T) {
+	bdb := setupTestDB(t)
+
+	err := bdb.RecordDeployment("host-a", DeploymentRecord{
+		Timestamp:   time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
+		Fingerprint: "fp-missing",
+		Success:     true,
+	})
+	require.NoError(t, err)
+
+	result, err := bdb.HostsCommitsBehind([]string{"host-a"})
+	require.NoError(t, err)
+	_, ok := result["host-a"]
+	assert.False(t, ok, "host with untracked fingerprint should be omitted")
+}
+
+func TestHostsCommitsBehindMultipleHosts(t *testing.T) {
+	bdb := setupTestDB(t)
+
+	storeTestFlakeVersion(t, bdb, FlakeVersion{
+		Fingerprint: "fp-1",
+		Dirty:       false,
+		StoredAt:    time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
+	})
+	storeTestFlakeVersion(t, bdb, FlakeVersion{
+		Fingerprint: "fp-2",
+		Dirty:       false,
+		StoredAt:    time.Date(2025, 6, 2, 0, 0, 0, 0, time.UTC),
+	})
+
+	err := bdb.RecordDeployment("host-a", DeploymentRecord{
+		Timestamp:   time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
+		Fingerprint: "fp-1",
+		Success:     true,
+	})
+	require.NoError(t, err)
+
+	err = bdb.RecordDeployment("host-b", DeploymentRecord{
+		Timestamp:   time.Date(2025, 6, 2, 12, 0, 0, 0, time.UTC),
+		Fingerprint: "fp-2",
+		Success:     true,
+	})
+	require.NoError(t, err)
+
+	result, err := bdb.HostsCommitsBehind([]string{"host-a", "host-b", "host-c"})
+	require.NoError(t, err)
+	assert.Equal(t, CommitsBehindInfo{Behind: 1, Dirty: false}, result["host-a"])
+	assert.Equal(t, CommitsBehindInfo{Behind: 0, Dirty: false}, result["host-b"])
+	_, ok := result["host-c"]
+	assert.False(t, ok, "host with no deployments should be omitted")
+}

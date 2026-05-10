@@ -293,3 +293,58 @@ func (b *BoltDB) LatestDeployment(host string) (*DeploymentRecord, error) {
 
 	return record, err
 }
+
+// CommitsBehindInfo contains behind-count information for a host's deployment.
+type CommitsBehindInfo struct {
+	Behind int
+	Dirty  bool
+}
+
+// HostsCommitsBehind returns the number of clean (non-dirty) flake versions stored after
+// each host's most recent deployment, and whether that deployment was from a dirty tree.
+// Hosts with no deployment or whose fingerprint is not stored are omitted from the result.
+func (b *BoltDB) HostsCommitsBehind(hosts []string) (map[string]CommitsBehindInfo, error) {
+	versions, err := b.ListFlakeVersions()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list flake versions: %w", err)
+	}
+
+	result := make(map[string]CommitsBehindInfo, len(hosts))
+
+	for _, host := range hosts {
+		deploy, err := b.LatestDeployment(host)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get latest deployment for %q: %w", host, err)
+		}
+		if deploy == nil {
+			continue
+		}
+
+		// Find the deployed version in the versions list.
+		var deployVer *FlakeVersion
+		for i := range versions {
+			if versions[i].Fingerprint == deploy.Fingerprint {
+				deployVer = &versions[i]
+				break
+			}
+		}
+		if deployVer == nil {
+			continue
+		}
+
+		// Count clean versions stored after the deployed version.
+		behind := 0
+		for _, v := range versions {
+			if v.StoredAt.After(deployVer.StoredAt) && !v.Dirty {
+				behind++
+			}
+		}
+
+		result[host] = CommitsBehindInfo{
+			Behind: behind,
+			Dirty:  deployVer.Dirty,
+		}
+	}
+
+	return result, nil
+}

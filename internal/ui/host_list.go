@@ -25,8 +25,9 @@ func newHostList(hosts []string) hostListModel {
 	items := make([]list.Item, 0, len(hosts))
 	for _, host := range hosts {
 		items = append(items, hostItem{
-			name:      host,
-			busyCount: 0,
+			name:          host,
+			busyCount:     0,
+			commitsBehind: -1,
 		})
 	}
 
@@ -73,6 +74,8 @@ func (m hostListModel) Update(msg tea.Msg) (hostListModel, tea.Cmd) {
 	case jumpToLetterMsg:
 		cmd = m.handleJumpToLetterMsg(msg)
 		cmds = append(cmds, cmd)
+	case hostsBehindMsg:
+		m.handleHostsBehindMsg(msg)
 	case spinner.TickMsg:
 		*m.spinner, cmd = m.spinner.Update(msg)
 		cmds = append(cmds, cmd)
@@ -155,9 +158,11 @@ func (m *hostListModel) FilterState() list.FilterState {
 
 // hostItem represents an entry in the host list.
 type hostItem struct {
-	name      string
-	busyCount int // Number of active jobs for this host.
-	status    int // Status of most recent job for this host.
+	name          string
+	busyCount     int  // Number of active jobs for this host.
+	status        int  // Status of most recent job for this host.
+	commitsBehind int  // Number of clean commits behind latest; -1 means unknown/no deploy.
+	dirtyDeploy   bool // Last deploy was from a dirty working tree.
 }
 
 const (
@@ -168,6 +173,17 @@ const (
 
 func (item hostItem) FilterValue() string { return string(item.name) }
 func (item hostItem) String() string      { return string(item.name) }
+
+// behindInfo holds behind-count data for a single host.
+type behindInfo struct {
+	behind int
+	dirty  bool
+}
+
+// hostsBehindMsg updates the host list with behind-count data for all hosts.
+type hostsBehindMsg struct {
+	counts map[string]behindInfo
+}
 
 type itemDelegate struct {
 	spinner           *spinner.Model // Shared spinner for all items, updates handled by hostListModel.
@@ -191,6 +207,17 @@ func newItemDelegate(spinner *spinner.Model, maxWidth int) itemDelegate {
 func (d itemDelegate) Height() int                             { return 1 }
 func (d itemDelegate) Spacing() int                            { return 0 }
 func (d itemDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
+
+func (m *hostListModel) handleHostsBehindMsg(msg hostsBehindMsg) {
+	for i, h := range m.list.Items() {
+		item := h.(hostItem)
+		if info, ok := msg.counts[item.name]; ok {
+			item.commitsBehind = info.behind
+			item.dirtyDeploy = info.dirty
+			m.list.SetItem(i, item)
+		}
+	}
+}
 
 var (
 	renderedStatusSuccess = lipgloss.NewStyle().Foreground(successColor).Render("✓")
@@ -227,6 +254,27 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	}
 
 	line := style.Render(selected) + status + style.Render(item.name)
+
+	// Render the behind-count decoration, right-aligned.
+	if item.commitsBehind >= 0 {
+		behindStr := fmt.Sprintf("%d", item.commitsBehind)
+		if item.dirtyDeploy {
+			behindStr += "*"
+		} else {
+			behindStr += " "
+		}
+		behindRendered := subtleStyle.Render(behindStr)
+
+		lineLen := lipgloss.Width(line)
+		behindLen := lipgloss.Width(behindRendered)
+		pad := d.maxWidth - lineLen - behindLen
+
+		if pad > 1 {
+			line += strings.Repeat(" ", pad)
+		}
+		line += behindRendered
+	}
+
 	fmt.Fprint(w, d.itemStyle.MaxWidth(d.maxWidth).Render(line))
 }
 
