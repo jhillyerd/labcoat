@@ -244,24 +244,28 @@ func TestHostsCommitsBehindThreeCommitsBehind(t *testing.T) {
 	bdb := setupTestDB(t)
 
 	storeTestFlakeVersion(t, bdb, FlakeVersion{
-		Fingerprint: "fp-old",
-		Dirty:       false,
-		StoredAt:    time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
+		Fingerprint:  "fp-old",
+		Dirty:        false,
+		LastModified: time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
+		StoredAt:     time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
 	})
 	storeTestFlakeVersion(t, bdb, FlakeVersion{
-		Fingerprint: "fp-mid",
-		Dirty:       false,
-		StoredAt:    time.Date(2025, 6, 2, 0, 0, 0, 0, time.UTC),
+		Fingerprint:  "fp-mid",
+		Dirty:        false,
+		LastModified: time.Date(2025, 6, 2, 0, 0, 0, 0, time.UTC),
+		StoredAt:     time.Date(2025, 6, 2, 0, 0, 0, 0, time.UTC),
 	})
 	storeTestFlakeVersion(t, bdb, FlakeVersion{
-		Fingerprint: "fp-dirty",
-		Dirty:       true,
-		StoredAt:    time.Date(2025, 6, 3, 0, 0, 0, 0, time.UTC),
+		Fingerprint:  "fp-dirty",
+		Dirty:        true,
+		LastModified: time.Date(2025, 6, 3, 0, 0, 0, 0, time.UTC),
+		StoredAt:     time.Date(2025, 6, 3, 0, 0, 0, 0, time.UTC),
 	})
 	storeTestFlakeVersion(t, bdb, FlakeVersion{
-		Fingerprint: "fp-new",
-		Dirty:       false,
-		StoredAt:    time.Date(2025, 6, 4, 0, 0, 0, 0, time.UTC),
+		Fingerprint:  "fp-new",
+		Dirty:        false,
+		LastModified: time.Date(2025, 6, 4, 0, 0, 0, 0, time.UTC),
+		StoredAt:     time.Date(2025, 6, 4, 0, 0, 0, 0, time.UTC),
 	})
 
 	err := bdb.RecordDeployment("host-a", DeploymentRecord{
@@ -281,14 +285,16 @@ func TestHostsCommitsBehindDirtyDeploy(t *testing.T) {
 	bdb := setupTestDB(t)
 
 	storeTestFlakeVersion(t, bdb, FlakeVersion{
-		Fingerprint: "fp-dirty",
-		Dirty:       true,
-		StoredAt:    time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
+		Fingerprint:  "fp-dirty",
+		Dirty:        true,
+		LastModified: time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
+		StoredAt:     time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
 	})
 	storeTestFlakeVersion(t, bdb, FlakeVersion{
-		Fingerprint: "fp-clean",
-		Dirty:       false,
-		StoredAt:    time.Date(2025, 6, 2, 0, 0, 0, 0, time.UTC),
+		Fingerprint:  "fp-clean",
+		Dirty:        false,
+		LastModified: time.Date(2025, 6, 2, 0, 0, 0, 0, time.UTC),
+		StoredAt:     time.Date(2025, 6, 2, 0, 0, 0, 0, time.UTC),
 	})
 
 	err := bdb.RecordDeployment("host-a", DeploymentRecord{
@@ -323,14 +329,16 @@ func TestHostsCommitsBehindMultipleHosts(t *testing.T) {
 	bdb := setupTestDB(t)
 
 	storeTestFlakeVersion(t, bdb, FlakeVersion{
-		Fingerprint: "fp-1",
-		Dirty:       false,
-		StoredAt:    time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
+		Fingerprint:  "fp-1",
+		Dirty:        false,
+		LastModified: time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
+		StoredAt:     time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
 	})
 	storeTestFlakeVersion(t, bdb, FlakeVersion{
-		Fingerprint: "fp-2",
-		Dirty:       false,
-		StoredAt:    time.Date(2025, 6, 2, 0, 0, 0, 0, time.UTC),
+		Fingerprint:  "fp-2",
+		Dirty:        false,
+		LastModified: time.Date(2025, 6, 2, 0, 0, 0, 0, time.UTC),
+		StoredAt:     time.Date(2025, 6, 2, 0, 0, 0, 0, time.UTC),
 	})
 
 	err := bdb.RecordDeployment("host-a", DeploymentRecord{

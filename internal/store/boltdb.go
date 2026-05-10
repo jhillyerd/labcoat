@@ -332,10 +332,10 @@ func (b *BoltDB) HostsCommitsBehind(hosts []string) (map[string]CommitsBehindInf
 			continue
 		}
 
-		// Count clean versions stored after the deployed version.
+		// Count clean versions modified after the deployed version.
 		behind := 0
 		for _, v := range versions {
-			if v.StoredAt.After(deployVer.StoredAt) && !v.Dirty {
+			if v.LastModified.After(deployVer.LastModified) && !v.Dirty {
 				behind++
 			}
 		}
