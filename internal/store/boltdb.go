@@ -270,7 +270,7 @@ func (b *BoltDB) LatestDeployment(host string) (*DeploymentRecord, error) {
 	err := b.db.View(func(tx *bolt.Tx) error {
 		root := tx.Bucket([]byte(deployHistory))
 		if root == nil {
-			return nil
+			return fmt.Errorf("Failed to get %q bucket, was nil", deployHistory)
 		}
 		bucket := root.Bucket([]byte(host))
 		if bucket == nil {
@@ -294,6 +294,41 @@ func (b *BoltDB) LatestDeployment(host string) (*DeploymentRecord, error) {
 	return record, err
 }
 
+// LatestSuccessfulDeployment returns the most recent successful deployment for a
+// host, or nil if none.
+func (b *BoltDB) LatestSuccessfulDeployment(host string) (*DeploymentRecord, error) {
+	var record *DeploymentRecord
+
+	err := b.db.View(func(tx *bolt.Tx) error {
+		root := tx.Bucket([]byte(deployHistory))
+		if root == nil {
+			return fmt.Errorf("Failed to get %q bucket, was nil", deployHistory)
+		}
+		bucket := root.Bucket([]byte(host))
+		if bucket == nil {
+			return nil
+		}
+
+		// Keys are big-endian timestamps, so iterating Last/Prev yields
+		// most-recent-first. Return the first record with Success == true.
+		c := bucket.Cursor()
+		for k, v := c.Last(); k != nil; k, v = c.Prev() {
+			var rec DeploymentRecord
+			if err := msgpack.Unmarshal(v, &rec); err != nil {
+				return fmt.Errorf("Failed to unmarshal deployment record: %w", err)
+			}
+			if rec.Success {
+				record = &rec
+				return nil
+			}
+		}
+
+		return nil
+	})
+
+	return record, err
+}
+
 // CommitsBehindInfo contains behind-count information for a host's deployment.
 type CommitsBehindInfo struct {
 	Behind int
@@ -301,8 +336,8 @@ type CommitsBehindInfo struct {
 }
 
 // HostsCommitsBehind returns the number of clean (non-dirty) flake versions stored after
-// each host's most recent deployment, and whether that deployment was from a dirty tree.
-// Hosts with no deployment or whose fingerprint is not stored are omitted from the result.
+// each host's most recent successful deployment, and whether that deployment was from a dirty tree.
+// Hosts with no successful deployment or whose fingerprint is not stored are omitted from the result.
 func (b *BoltDB) HostsCommitsBehind(hosts []string) (map[string]CommitsBehindInfo, error) {
 	versions, err := b.ListFlakeVersions()
 	if err != nil {
@@ -312,7 +347,7 @@ func (b *BoltDB) HostsCommitsBehind(hosts []string) (map[string]CommitsBehindInf
 	result := make(map[string]CommitsBehindInfo, len(hosts))
 
 	for _, host := range hosts {
-		deploy, err := b.LatestDeployment(host)
+		deploy, err := b.LatestSuccessfulDeployment(host)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get latest deployment for %q: %w", host, err)
 		}

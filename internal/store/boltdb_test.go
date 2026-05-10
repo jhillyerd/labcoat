@@ -51,7 +51,7 @@ func TestListDeploymentsOrderedByMostRecent(t *testing.T) {
 	bdb := setupTestDB(t)
 	host := "myhost"
 
-	// Insert in chronological order.
+	// Insert out of chronological order.
 	records := []DeploymentRecord{
 		{Timestamp: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), Fingerprint: "aaa", Success: true},
 		{Timestamp: time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC), Fingerprint: "bbb", Success: false},
@@ -135,6 +135,63 @@ func TestLatestDeployment(t *testing.T) {
 	require.NotNil(t, rec)
 	assert.Equal(t, "new", rec.Fingerprint)
 	assert.False(t, rec.Success)
+}
+
+func TestLatestSuccessfulDeploymentNone(t *testing.T) {
+	bdb := setupTestDB(t)
+
+	rec, err := bdb.LatestSuccessfulDeployment("nonexistent")
+	require.NoError(t, err)
+	assert.Nil(t, rec)
+}
+
+func TestLatestSuccessfulDeployment(t *testing.T) {
+	bdb := setupTestDB(t)
+	host := "myhost"
+
+	err := bdb.RecordDeployment(host, DeploymentRecord{
+		Timestamp:   time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		Fingerprint: "old-ok",
+		Success:     true,
+	})
+	require.NoError(t, err)
+
+	err = bdb.RecordDeployment(host, DeploymentRecord{
+		Timestamp:   time.Date(2025, 3, 1, 0, 0, 0, 0, time.UTC),
+		Fingerprint: "mid-fail",
+		Success:     false,
+	})
+	require.NoError(t, err)
+
+	err = bdb.RecordDeployment(host, DeploymentRecord{
+		Timestamp:   time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
+		Fingerprint: "new-fail",
+		Success:     false,
+	})
+	require.NoError(t, err)
+
+	// Should skip failed deployments and return the oldest successful one.
+	rec, err := bdb.LatestSuccessfulDeployment(host)
+	require.NoError(t, err)
+	require.NotNil(t, rec)
+	assert.Equal(t, "old-ok", rec.Fingerprint)
+	assert.True(t, rec.Success)
+}
+
+func TestLatestSuccessfulDeploymentAllFailed(t *testing.T) {
+	bdb := setupTestDB(t)
+	host := "myhost"
+
+	err := bdb.RecordDeployment(host, DeploymentRecord{
+		Timestamp:   time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		Fingerprint: "fail1",
+		Success:     false,
+	})
+	require.NoError(t, err)
+
+	rec, err := bdb.LatestSuccessfulDeployment(host)
+	require.NoError(t, err)
+	assert.Nil(t, rec)
 }
 
 // --- FlakeVersion tests ---
@@ -240,7 +297,7 @@ func TestHostsCommitsBehindUpToDate(t *testing.T) {
 	assert.Equal(t, CommitsBehindInfo{Behind: 0, Dirty: false}, result["host-a"])
 }
 
-func TestHostsCommitsBehindThreeCommitsBehind(t *testing.T) {
+func TestHostsCommitsBehindTwoCommitsBehind(t *testing.T) {
 	bdb := setupTestDB(t)
 
 	storeTestFlakeVersion(t, bdb, FlakeVersion{
@@ -323,6 +380,74 @@ func TestHostsCommitsBehindFingerprintNotStored(t *testing.T) {
 	require.NoError(t, err)
 	_, ok := result["host-a"]
 	assert.False(t, ok, "host with untracked fingerprint should be omitted")
+}
+
+func TestHostsCommitsBehindSkipsFailedDeployment(t *testing.T) {
+	bdb := setupTestDB(t)
+
+	storeTestFlakeVersion(t, bdb, FlakeVersion{
+		Fingerprint:  "fp-old",
+		Dirty:        false,
+		LastModified: time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
+		StoredAt:     time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
+	})
+	storeTestFlakeVersion(t, bdb, FlakeVersion{
+		Fingerprint:  "fp-failed",
+		Dirty:        false,
+		LastModified: time.Date(2025, 6, 2, 0, 0, 0, 0, time.UTC),
+		StoredAt:     time.Date(2025, 6, 2, 0, 0, 0, 0, time.UTC),
+	})
+	storeTestFlakeVersion(t, bdb, FlakeVersion{
+		Fingerprint:  "fp-new",
+		Dirty:        false,
+		LastModified: time.Date(2025, 6, 3, 0, 0, 0, 0, time.UTC),
+		StoredAt:     time.Date(2025, 6, 3, 0, 0, 0, 0, time.UTC),
+	})
+
+	// Successful deployment of fp-old.
+	err := bdb.RecordDeployment("host-a", DeploymentRecord{
+		Timestamp:   time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
+		Fingerprint: "fp-old",
+		Success:     true,
+	})
+	require.NoError(t, err)
+
+	// Failed deployment of fp-failed — should be ignored.
+	err = bdb.RecordDeployment("host-a", DeploymentRecord{
+		Timestamp:   time.Date(2025, 6, 2, 12, 0, 0, 0, time.UTC),
+		Fingerprint: "fp-failed",
+		Success:     false,
+	})
+	require.NoError(t, err)
+
+	result, err := bdb.HostsCommitsBehind([]string{"host-a"})
+	require.NoError(t, err)
+	// Should be based on fp-old (successful), so 2 clean versions after it
+	// (fp-failed and fp-new), not 1 as it would be if based on fp-failed.
+	assert.Equal(t, CommitsBehindInfo{Behind: 2, Dirty: false}, result["host-a"])
+}
+
+func TestHostsCommitsBehindOnlyFailedDeploys(t *testing.T) {
+	bdb := setupTestDB(t)
+
+	storeTestFlakeVersion(t, bdb, FlakeVersion{
+		Fingerprint:  "fp1",
+		Dirty:        false,
+		LastModified: time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
+		StoredAt:     time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
+	})
+
+	err := bdb.RecordDeployment("host-a", DeploymentRecord{
+		Timestamp:   time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
+		Fingerprint: "fp1",
+		Success:     false,
+	})
+	require.NoError(t, err)
+
+	result, err := bdb.HostsCommitsBehind([]string{"host-a"})
+	require.NoError(t, err)
+	_, ok := result["host-a"]
+	assert.False(t, ok, "host with only failed deployments should be omitted")
 }
 
 func TestHostsCommitsBehindMultipleHosts(t *testing.T) {

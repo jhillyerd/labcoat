@@ -90,6 +90,7 @@ type hostModel struct {
 		contentPanel viewport.Model
 		runner       *runner.Model
 		cancel       func()
+		fingerprint  string // Captured at deploy start to avoid drift.
 	}
 	log struct {
 		contentPanel viewport.Model
@@ -1160,7 +1161,7 @@ func (m *Model) cmdListHosts() tea.Cmd {
 			line := "  " + name
 
 			// Show lastModified date from latest deployed fingerprint.
-			if deploy, err := m.db.LatestDeployment(name); err != nil {
+			if deploy, err := m.db.LatestSuccessfulDeployment(name); err != nil {
 				slog.Error("Failed to query latest deployment", "host", name, "err", err)
 			} else if deploy != nil {
 				if ver, err := m.db.GetFlakeVersion(deploy.Fingerprint); err != nil {

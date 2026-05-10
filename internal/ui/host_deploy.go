@@ -67,6 +67,7 @@ func (m *Model) handleHostDeployMsg(msg hostDeployMsg) tea.Cmd {
 	srunner.Styles.StatusSuffix = subtleStyle
 	host.deploy.runner = srunner
 	host.deploy.cancel = cancel
+	host.deploy.fingerprint = m.flakeFingerprint // Capture current fingerprint.
 
 	// Init status display.
 	intro := lipgloss.NewStyle().
@@ -76,8 +77,8 @@ func (m *Model) handleHostDeployMsg(msg hostDeployMsg) tea.Cmd {
 	host.deploy.contentPanel.SetContent(intro)
 
 	logText := fmt.Sprintf("NixOS deployment started, target: %s", targetHost)
-	if m.flakeFingerprint != "" {
-		logText += fmt.Sprintf(", fingerprint: %s", shortFingerprint(m.flakeFingerprint))
+	if host.deploy.fingerprint != "" {
+		logText += fmt.Sprintf(", fingerprint: %s", shortFingerprint(host.deploy.fingerprint))
 	}
 	logCmd := m.hostLogCmd(host, logText)
 	busyCmd := hostListIncrBusyCmd(host.name)
@@ -97,11 +98,13 @@ func (m *Model) handleHostDeployOutputMsg(msg hostDeployOutputMsg) tea.Cmd {
 	if msg.final {
 		success := srunner.Successful()
 
+		fp := host.deploy.fingerprint
+
 		// Persist deployment record.
-		if m.flakeFingerprint != "" {
+		if fp != "" {
 			record := store.DeploymentRecord{
 				Timestamp:   time.Now(),
-				Fingerprint: m.flakeFingerprint,
+				Fingerprint: fp,
 				Success:     success,
 			}
 			if err := m.db.RecordDeployment(host.name, record); err != nil {
@@ -113,8 +116,8 @@ func (m *Model) handleHostDeployOutputMsg(msg hostDeployOutputMsg) tea.Cmd {
 
 		// Log completion.
 		logText := fmt.Sprintf("NixOS deployment finished: %s", srunner.StateString())
-		if m.flakeFingerprint != "" {
-			logText += fmt.Sprintf(", fingerprint: %s", shortFingerprint(m.flakeFingerprint))
+		if fp != "" {
+			logText += fmt.Sprintf(", fingerprint: %s", shortFingerprint(fp))
 		}
 		logCmd := m.hostLogCmd(
 			msg.host,
