@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/jhillyerd/labcoat/internal/runner"
+	"github.com/jhillyerd/labcoat/internal/store"
 )
 
 type hostDeployMsg struct {
@@ -65,6 +67,7 @@ func (m *Model) handleHostDeployMsg(msg hostDeployMsg) tea.Cmd {
 	srunner.Styles.StatusSuffix = subtleStyle
 	host.deploy.runner = srunner
 	host.deploy.cancel = cancel
+	host.deploy.fingerprint = m.flakeFingerprint // Capture current fingerprint.
 
 	// Init status display.
 	intro := lipgloss.NewStyle().
@@ -73,7 +76,11 @@ func (m *Model) handleHostDeployMsg(msg hostDeployMsg) tea.Cmd {
 	host.deploy.intro = intro
 	host.deploy.contentPanel.SetContent(intro)
 
-	logCmd := m.hostLogCmd(host, fmt.Sprintf("NixOS deployment started, target: %s", targetHost))
+	logText := fmt.Sprintf("NixOS deployment started, target: %s", targetHost)
+	if host.deploy.fingerprint != "" {
+		logText += fmt.Sprintf(", fingerprint: %s", shortFingerprint(host.deploy.fingerprint))
+	}
+	logCmd := m.hostLogCmd(host, logText)
 	busyCmd := hostListIncrBusyCmd(host.name)
 	return tea.Batch(srunner.Init(m.program), logCmd, busyCmd)
 }
@@ -89,18 +96,40 @@ func (m *Model) handleHostDeployOutputMsg(msg hostDeployOutputMsg) tea.Cmd {
 	}
 
 	if msg.final {
+		success := srunner.Successful()
+
+		fp := host.deploy.fingerprint
+
+		// Persist deployment record.
+		if fp != "" {
+			record := store.DeploymentRecord{
+				Timestamp:   time.Now(),
+				Fingerprint: fp,
+				Success:     success,
+			}
+			if err := m.db.RecordDeployment(host.name, record); err != nil {
+				slog.Error("Failed to record deployment", "host", host.name, "err", err)
+			}
+		} else {
+			slog.Warn("No flake fingerprint available, skipping deployment record", "host", host.name)
+		}
+
 		// Log completion.
+		logText := fmt.Sprintf("NixOS deployment finished: %s", srunner.StateString())
+		if fp != "" {
+			logText += fmt.Sprintf(", fingerprint: %s", shortFingerprint(fp))
+		}
 		logCmd := m.hostLogCmd(
 			msg.host,
-			fmt.Sprintf("NixOS deployment finished: %s", srunner.StateString()))
+			logText)
 
 		status := hostItemStatusSuccess
-		if !srunner.Successful() {
+		if !success {
 			status = hostItemStatusFailed
 		}
 		busyCmd := hostListDecrBusyCmd(host.name, status)
 
-		cmds = append(cmds, logCmd, busyCmd)
+		cmds = append(cmds, logCmd, busyCmd, m.fetchAllHostsBehindCmd())
 	} else {
 		// Schedule next update.
 		_, updateCmd := srunner.Update(nil)

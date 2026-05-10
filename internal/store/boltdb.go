@@ -3,9 +3,10 @@ package store
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/vmihailenco/msgpack/v5"
 	"slices"
 	"time"
+
+	"github.com/vmihailenco/msgpack/v5"
 
 	"github.com/jhillyerd/labcoat/internal/nix"
 	bolt "go.etcd.io/bbolt"
@@ -14,6 +15,7 @@ import (
 const (
 	flakeVersions = "flake-versions"
 	hostLogs      = "host-logs"
+	deployHistory = "deploy-history"
 )
 
 type BoltDB struct {
@@ -22,7 +24,7 @@ type BoltDB struct {
 
 func NewBoltDB(db *bolt.DB) (*BoltDB, error) {
 	err := db.Update(func(tx *bolt.Tx) error {
-		for _, name := range []string{flakeVersions, hostLogs} {
+		for _, name := range []string{flakeVersions, hostLogs, deployHistory} {
 			if _, err := tx.CreateBucketIfNotExists([]byte(name)); err != nil {
 				return fmt.Errorf("Failed to create %q root bucket: %w", name, err)
 			}
@@ -200,4 +202,184 @@ func (b *BoltDB) GetFlakeVersion(fingerprint string) (*FlakeVersion, error) {
 	})
 
 	return version, err
+}
+
+// DeploymentRecord represents a single deployment attempt for a host.
+type DeploymentRecord struct {
+	Timestamp   time.Time
+	Fingerprint string
+	Success     bool
+}
+
+// RecordDeployment records a deployment attempt for a host.
+func (b *BoltDB) RecordDeployment(host string, record DeploymentRecord) error {
+	return b.db.Update(func(tx *bolt.Tx) error {
+		root := tx.Bucket([]byte(deployHistory))
+		if root == nil {
+			return fmt.Errorf("Failed to get %q bucket, was nil", deployHistory)
+		}
+		bucket, err := root.CreateBucketIfNotExists([]byte(host))
+		if err != nil {
+			return fmt.Errorf("Failed to create %q deployment bucket: %w", host, err)
+		}
+
+		data, err := msgpack.Marshal(record)
+		if err != nil {
+			return fmt.Errorf("Failed to marshal deployment record: %w", err)
+		}
+
+		return bucket.Put(ttob(record.Timestamp), data)
+	})
+}
+
+// ListDeployments returns deployment history for a host, most recent first.
+func (b *BoltDB) ListDeployments(host string) ([]DeploymentRecord, error) {
+	var records []DeploymentRecord
+
+	err := b.db.View(func(tx *bolt.Tx) error {
+		root := tx.Bucket([]byte(deployHistory))
+		if root == nil {
+			return fmt.Errorf("Failed to get %q bucket, was nil", deployHistory)
+		}
+		bucket := root.Bucket([]byte(host))
+		if bucket == nil {
+			return nil
+		}
+
+		// Keys are big-endian timestamps, so iterating Last/Prev yields
+		// most-recent-first without needing an in-memory sort.
+		c := bucket.Cursor()
+		for k, v := c.Last(); k != nil; k, v = c.Prev() {
+			var rec DeploymentRecord
+			if err := msgpack.Unmarshal(v, &rec); err != nil {
+				return fmt.Errorf("Failed to unmarshal deployment record: %w", err)
+			}
+			records = append(records, rec)
+		}
+
+		return nil
+	})
+
+	return records, err
+}
+
+// LatestDeployment returns the most recent deployment for a host, or nil if none.
+func (b *BoltDB) LatestDeployment(host string) (*DeploymentRecord, error) {
+	var record *DeploymentRecord
+
+	err := b.db.View(func(tx *bolt.Tx) error {
+		root := tx.Bucket([]byte(deployHistory))
+		if root == nil {
+			return fmt.Errorf("Failed to get %q bucket, was nil", deployHistory)
+		}
+		bucket := root.Bucket([]byte(host))
+		if bucket == nil {
+			return nil
+		}
+
+		// Keys are big-endian timestamps, so last key is most recent.
+		_, v := bucket.Cursor().Last()
+		if v == nil {
+			return nil
+		}
+
+		var rec DeploymentRecord
+		if err := msgpack.Unmarshal(v, &rec); err != nil {
+			return fmt.Errorf("Failed to unmarshal deployment record: %w", err)
+		}
+		record = &rec
+		return nil
+	})
+
+	return record, err
+}
+
+// LatestSuccessfulDeployment returns the most recent successful deployment for a
+// host, or nil if none.
+func (b *BoltDB) LatestSuccessfulDeployment(host string) (*DeploymentRecord, error) {
+	var record *DeploymentRecord
+
+	err := b.db.View(func(tx *bolt.Tx) error {
+		root := tx.Bucket([]byte(deployHistory))
+		if root == nil {
+			return fmt.Errorf("Failed to get %q bucket, was nil", deployHistory)
+		}
+		bucket := root.Bucket([]byte(host))
+		if bucket == nil {
+			return nil
+		}
+
+		// Keys are big-endian timestamps, so iterating Last/Prev yields
+		// most-recent-first. Return the first record with Success == true.
+		c := bucket.Cursor()
+		for k, v := c.Last(); k != nil; k, v = c.Prev() {
+			var rec DeploymentRecord
+			if err := msgpack.Unmarshal(v, &rec); err != nil {
+				return fmt.Errorf("Failed to unmarshal deployment record: %w", err)
+			}
+			if rec.Success {
+				record = &rec
+				return nil
+			}
+		}
+
+		return nil
+	})
+
+	return record, err
+}
+
+// CommitsBehindInfo contains behind-count information for a host's deployment.
+type CommitsBehindInfo struct {
+	Behind int
+	Dirty  bool
+}
+
+// HostsCommitsBehind returns the number of clean (non-dirty) flake versions stored after
+// each host's most recent successful deployment, and whether that deployment was from a dirty tree.
+// Hosts with no successful deployment or whose fingerprint is not stored are omitted from the result.
+func (b *BoltDB) HostsCommitsBehind(hosts []string) (map[string]CommitsBehindInfo, error) {
+	versions, err := b.ListFlakeVersions()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list flake versions: %w", err)
+	}
+
+	result := make(map[string]CommitsBehindInfo, len(hosts))
+
+	for _, host := range hosts {
+		deploy, err := b.LatestSuccessfulDeployment(host)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get latest deployment for %q: %w", host, err)
+		}
+		if deploy == nil {
+			continue
+		}
+
+		// Find the deployed version in the versions list.
+		var deployVer *FlakeVersion
+		for i := range versions {
+			if versions[i].Fingerprint == deploy.Fingerprint {
+				deployVer = &versions[i]
+				break
+			}
+		}
+		if deployVer == nil {
+			continue
+		}
+
+		// Count clean versions modified after the deployed version.
+		behind := 0
+		for _, v := range versions {
+			if v.LastModified.After(deployVer.LastModified) && !v.Dirty {
+				behind++
+			}
+		}
+
+		result[host] = CommitsBehindInfo{
+			Behind: behind,
+			Dirty:  deployVer.Dirty,
+		}
+	}
+
+	return result, nil
 }

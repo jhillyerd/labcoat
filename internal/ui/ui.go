@@ -42,32 +42,33 @@ const (
 var hostTabNames = []string{"Host Status", "Deploy", "Run Command", "Op Log"}
 
 type Model struct {
-	ctx            context.Context
-	program        *tea.Program
-	db             *store.BoltDB
-	config         config.Config
-	ready          bool // true once screen size is known.
-	viewMode       int  // Current UI mode.
-	flakePath      string
-	hostList       hostListModel
-	hosts          map[string]*hostModel
-	selectedHost   *hostModel
-	hoverTimerID   uint64 // Unique ID for each host hover timer.
-	nixPool        *npool.Pool
-	contentPanel   *viewport.Model
-	sizes          layoutSizes
-	keys           config.KeyMap
-	help           help.Model
-	spinner        spinner.Model
-	jumpToLetter   bool
-	confirmation   *confirmationMsg
-	commandPalette *CommandPalette
-	inputOverlay   *InputOverlay
-	textDialog     *ScrollableDialog
-	error          string
-	flashText      string
-	flashTimer     *time.Timer
-	cmdHistory     []string
+	ctx              context.Context
+	program          *tea.Program
+	db               *store.BoltDB
+	config           config.Config
+	ready            bool // true once screen size is known.
+	viewMode         int  // Current UI mode.
+	flakePath        string
+	flakeFingerprint string // Current flake fingerprint, updated by metadata fetch.
+	hostList         hostListModel
+	hosts            map[string]*hostModel
+	selectedHost     *hostModel
+	hoverTimerID     uint64 // Unique ID for each host hover timer.
+	nixPool          *npool.Pool
+	contentPanel     *viewport.Model
+	sizes            layoutSizes
+	keys             config.KeyMap
+	help             help.Model
+	spinner          spinner.Model
+	jumpToLetter     bool
+	confirmation     *confirmationMsg
+	commandPalette   *CommandPalette
+	inputOverlay     *InputOverlay
+	textDialog       *ScrollableDialog
+	error            string
+	flashText        string
+	flashTimer       *time.Timer
+	cmdHistory       []string
 }
 
 type sshCheckState int
@@ -89,6 +90,7 @@ type hostModel struct {
 		contentPanel viewport.Model
 		runner       *runner.Model
 		cancel       func()
+		fingerprint  string // Captured at deploy start to avoid drift.
 	}
 	log struct {
 		contentPanel viewport.Model
@@ -230,6 +232,7 @@ func (m Model) Init() tea.Cmd {
 		m.hostList.Init(),
 		m.spinner.Tick,
 		m.fetchFlakeMetadataCmd(),
+		m.fetchAllHostsBehindCmd(),
 	)
 }
 
@@ -743,12 +746,16 @@ func (m *Model) fetchFlakeMetadataCmd() tea.Cmd {
 }
 
 func (m *Model) handleFlakeMetadataMsg(msg flakeMetadataMsg) tea.Cmd {
+	m.flakeFingerprint = msg.meta.Fingerprint
 	if err := m.db.StoreFlakeVersion(msg.meta); err != nil {
 		slog.Error("Failed to store flake version", "err", err)
 	}
-	return tea.Tick(time.Minute, func(time.Time) tea.Msg {
-		return flakeMetadataTickMsg{}
-	})
+	return tea.Batch(
+		tea.Tick(time.Minute, func(time.Time) tea.Msg {
+			return flakeMetadataTickMsg{}
+		}),
+		m.fetchAllHostsBehindCmd(),
+	)
 }
 
 func (m *Model) handleOpenPagerMsg(_ openPagerMsg) tea.Cmd {
@@ -1054,6 +1061,11 @@ func errorFlashCmd(format string, a ...any) tea.Cmd {
 func (m *Model) commands() []Command {
 	return []Command{
 		{
+			Name:        "deployments",
+			Description: "List deployment history for selected host",
+			Execute:     (*Model).cmdListDeployments,
+		},
+		{
 			Name:        "fingerprints",
 			Description: "List stored flake fingerprints",
 			Execute:     (*Model).cmdListFingerprints,
@@ -1063,6 +1075,44 @@ func (m *Model) commands() []Command {
 			Description: "List configured hosts",
 			Execute:     (*Model).cmdListHosts,
 		},
+	}
+}
+
+func (m *Model) cmdListDeployments() tea.Cmd {
+	host := m.selectedHost
+	if host == nil {
+		return func() tea.Msg {
+			return textDisplayMsg{text: "No host selected."}
+		}
+	}
+	hostName := host.name
+
+	return func() tea.Msg {
+		records, err := m.db.ListDeployments(hostName)
+		if err != nil {
+			slog.Error("Failed to list deployments", "err", err, "host", hostName)
+			return criticalErrorMsg{detail: "Failed to list deployments: " + err.Error()}
+		}
+
+		if len(records) == 0 {
+			return textDisplayMsg{text: fmt.Sprintf("No deployment history for %q.", hostName)}
+		}
+
+		var b strings.Builder
+		fmt.Fprintf(&b, "Deployment History for %q\n\n", hostName)
+
+		for _, r := range records {
+			status := renderedStatusFailed
+			if r.Success {
+				status = renderedStatusSuccess
+			}
+			fmt.Fprintf(&b, "  %s %s  %s\n",
+				subtleStyle.Render(r.Timestamp.Format(time.DateTime)),
+				status,
+				shortFingerprint(r.Fingerprint))
+		}
+
+		return textDisplayMsg{text: b.String()}
 	}
 }
 
@@ -1108,11 +1158,19 @@ func (m *Model) cmdListHosts() tea.Cmd {
 		slices.Sort(names)
 
 		for _, name := range names {
-			host := m.hosts[name]
 			line := "  " + name
-			if host.target != nil {
-				line += subtleStyle.Render(" → " + host.target.DeployHost)
+
+			// Show lastModified date from latest deployed fingerprint.
+			if deploy, err := m.db.LatestSuccessfulDeployment(name); err != nil {
+				slog.Error("Failed to query latest deployment", "host", name, "err", err)
+			} else if deploy != nil {
+				if ver, err := m.db.GetFlakeVersion(deploy.Fingerprint); err != nil {
+					slog.Error("Failed to query flake version", "host", name, "err", err)
+				} else if ver != nil {
+					line += subtleStyle.Render(" deployed revision " + ver.LastModified.Format(time.DateOnly))
+				}
 			}
+
 			b.WriteString(line + "\n")
 		}
 
@@ -1135,12 +1193,45 @@ func (m *Model) addToCmdHistory(cmd string) {
 	}
 }
 
+// fetchAllHostsBehindCmd returns a command that computes how many clean commits
+// behind the latest each host's most recent deployment is.
+func (m *Model) fetchAllHostsBehindCmd() tea.Cmd {
+	hostNames := make([]string, 0, len(m.hosts))
+	for name := range m.hosts {
+		hostNames = append(hostNames, name)
+	}
+	db := m.db
+
+	return func() tea.Msg {
+		storeInfo, err := db.HostsCommitsBehind(hostNames)
+		if err != nil {
+			slog.Error("Failed to compute hosts commits behind", "err", err)
+			return nil
+		}
+
+		counts := make(map[string]behindInfo, len(storeInfo))
+		for name, si := range storeInfo {
+			counts[name] = behindInfo{behind: si.Behind, dirty: si.Dirty}
+		}
+
+		return hostsBehindMsg{counts: counts}
+	}
+}
+
 func tabBorderWithBottom(left, middle, right string) lipgloss.Border {
 	border := lipgloss.RoundedBorder()
 	border.BottomLeft = left
 	border.Bottom = middle
 	border.BottomRight = right
 	return border
+}
+
+// shortFingerprint returns the first 12 chars of a fingerprint for display.
+func shortFingerprint(fp string) string {
+	if len(fp) > 12 {
+		return fp[:12]
+	}
+	return fp
 }
 
 func tabSuffixBorder() lipgloss.Border {

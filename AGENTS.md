@@ -31,6 +31,8 @@ go vet ./...                    # Run go vet
 go fmt ./...                    # Format code
 ```
 
+Always run `go fmt` and `go test` after making changes to prevent CI failures.
+
 ## Code Style Guidelines
 
 ### Imports
