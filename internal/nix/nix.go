@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"os/exec"
 	"text/template"
@@ -12,21 +11,13 @@ import (
 	"github.com/jhillyerd/labcoat/internal/config"
 )
 
-const namesScript = `
-	let
-		flake = builtins.getFlake "path:{{ .FlakePath }}";
-	in
-	builtins.attrNames flake.nixosConfigurations
-`
-
-var namesTmpl = template.Must(template.New("names").Parse(namesScript))
-
 type NamesRequest struct {
 	FlakePath string
 }
 
 func GetNames(data NamesRequest) ([]string, error) {
-	output, err := runScript(namesTmpl, data)
+	flakeURL := fmt.Sprintf("git+file://%s#nixosConfigurations", data.FlakePath)
+	output, err := nixEval(flakeURL, "builtins.attrNames")
 	if err != nil {
 		return nil, err
 	}
@@ -39,18 +30,8 @@ func GetNames(data NamesRequest) ([]string, error) {
 	return names, nil
 }
 
-const targetInfoScript = `
-	let
-		flake = builtins.getFlake "path:{{ .FlakePath }}";
-		key = "{{ .HostName }}";
-		target = flake.nixosConfigurations.${key};
-	in
-	{
-		deployHost = {{ .Config.Hosts.DeployHostAttr }};
-	}
-`
-
-var targetInfoTmpl = template.Must(template.New("targetInfo").Parse(targetInfoScript))
+var targetInfoApplyExpr = template.Must(
+	template.New("targetInfoApply").Parse("target: { deployHost = {{ .AttrPath }}; }"))
 
 type TargetInfoRequest struct {
 	FlakePath string
@@ -77,7 +58,18 @@ func (ti *TargetInfo) SSHDestination() string {
 }
 
 func GetTargetInfo(data TargetInfoRequest) (*TargetInfo, error) {
-	output, err := runScript(targetInfoTmpl, data)
+	flakeURL := fmt.Sprintf("git+file://%s#nixosConfigurations.%s", data.FlakePath, data.HostName)
+
+	// Render the --apply expression.
+	var applyBuf bytes.Buffer
+	if err := targetInfoApplyExpr.Execute(&applyBuf, struct{ AttrPath string }{
+		AttrPath: data.Config.Hosts.DeployHostAttr,
+	}); err != nil {
+		return nil, fmt.Errorf("nix apply template render: %w", err)
+	}
+	applyExpr := applyBuf.String()
+
+	output, err := nixEval(flakeURL, applyExpr)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +99,7 @@ type flakeMetadataJSON struct {
 }
 
 func GetFlakeMetadata(flakePath string) (*FlakeMetadata, error) {
-	cmd := exec.Command("nix", "flake", "metadata", "--json", flakePath)
+	cmd := exec.Command("nix", "flake", "metadata", "--json", "git+file://"+flakePath)
 	output, err := cmd.Output()
 	if err != nil {
 		out := ""
@@ -138,31 +130,23 @@ func GetFlakeMetadata(flakePath string) (*FlakeMetadata, error) {
 	return meta, nil
 }
 
-func runScript(tmpl *template.Template, data any) ([]byte, error) {
-	// Render script.
-	var scriptBuf bytes.Buffer
-	if err := tmpl.Execute(&scriptBuf, data); err != nil {
-		return nil, fmt.Errorf("nix template render: %w", err)
-	}
-	script, err := io.ReadAll(&scriptBuf)
-	if err != nil {
-		return nil, fmt.Errorf("nix template read: %w", err)
-	}
-	slog.Debug("Running nix script", "script", script)
+func nixEval(flakeURL string, applyExpr string) ([]byte, error) {
+	slog.Debug("Running nix eval", "url", flakeURL, "apply", applyExpr)
 
-	// Pass script to nix cmd.
-	cmd := exec.Command("nix", "eval", "--file", "-", "--json")
-	cmd.Stdin = bytes.NewReader(script)
+	args := []string{"eval", "--json", flakeURL}
+	if applyExpr != "" {
+		args = append(args, "--apply", applyExpr)
+	}
+	cmd := exec.Command("nix", args...)
 
 	output, err := cmd.Output()
 	if err != nil {
-		output := ""
+		stderr := ""
 		if exit, ok := err.(*exec.ExitError); ok {
-			output = "\n\nOutput:\n"
-			output += string(exit.Stderr)
+			stderr = "\n\nOutput:\n" + string(exit.Stderr)
 		}
 
-		return nil, fmt.Errorf("nix run failed: %w\n\nScript:\n%s%s", err, string(script), output)
+		return nil, fmt.Errorf("nix eval failed: %w\n\nURL: %s\nApply: %s%s", err, flakeURL, applyExpr, stderr)
 	}
 
 	return output, nil
