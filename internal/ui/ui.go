@@ -362,7 +362,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.commandPalette.Show()
 
 		case key.Matches(msg, m.keys.Deploy):
-			return m, m.hostDeployCmd(m.selectedHost)
+			return m, m.hostDeployCmd(m.selectedHost, "switch")
+
+		case key.Matches(msg, m.keys.DeployBoot):
+			return m, m.hostDeployCmd(m.selectedHost, "boot")
 
 		case key.Matches(msg, m.keys.Pager):
 			return m, func() tea.Msg { return openPagerMsg{} }
