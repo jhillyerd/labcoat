@@ -20,6 +20,7 @@ type KeyMap struct {
 	// Commands.
 	CommandPalette   key.Binding
 	Deploy           key.Binding
+	DeployBoot       key.Binding
 	Help             key.Binding
 	Reboot           key.Binding
 	RunCommandPrompt key.Binding
@@ -32,7 +33,7 @@ type KeyMap struct {
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Left, k.Right, k.ScrollUp, k.ScrollDown, k.Jump, k.Filter},
-		{k.Status, k.Deploy, k.SSHInto, k.RunCommandPrompt, k.Reboot},
+		{k.Status, k.Deploy, k.DeployBoot, k.SSHInto, k.RunCommandPrompt, k.Reboot},
 		{k.CommandPalette, k.Pager, k.Quit, k.Help},
 	}
 }
@@ -94,7 +95,11 @@ var DefaultKeyMap = KeyMap{
 	),
 	Deploy: key.NewBinding(
 		key.WithKeys("d"),
-		key.WithHelp("d", "deploy"),
+		key.WithHelp("d", "deploy (switch)"),
+	),
+	DeployBoot: key.NewBinding(
+		key.WithKeys("D"),
+		key.WithHelp("D", "deploy (boot)"),
 	),
 	Help: key.NewBinding(
 		key.WithKeys("?"),

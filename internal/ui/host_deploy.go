@@ -14,7 +14,8 @@ import (
 )
 
 type hostDeployMsg struct {
-	host *hostModel
+	host   *hostModel
+	action string // nixos-rebuild action: "switch" or "boot".
 }
 
 // Sent when the runner has new output/status to display.
@@ -23,10 +24,11 @@ type hostDeployOutputMsg struct {
 	final bool
 }
 
-func (m *Model) hostDeployCmd(host *hostModel) tea.Cmd {
+func (m *Model) hostDeployCmd(host *hostModel, action string) tea.Cmd {
 	return func() tea.Msg {
 		return hostDeployMsg{
-			host: host,
+			host:   host,
+			action: action,
 		}
 	}
 }
@@ -54,7 +56,7 @@ func (m *Model) handleHostDeployMsg(msg hostDeployMsg) tea.Cmd {
 	if m.config.Nix.DefaultBuildHost != "" {
 		args = append(args, "--build-host", m.config.Nix.DefaultBuildHost)
 	}
-	args = append(args, "switch")
+	args = append(args, msg.action)
 
 	ctx, cancel := context.WithCancel(m.ctx)
 	srunner := runner.NewLocal(ctx, onUpdate, m.flakePath, "nixos-rebuild", args...)
