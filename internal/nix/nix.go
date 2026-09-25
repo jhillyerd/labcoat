@@ -5,19 +5,48 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"text/template"
 
 	"github.com/jhillyerd/labcoat/internal/config"
 )
+
+// IsGitRepo reports whether flakePath is the root of a git repository.
+// Other packages use it to disable git-only features for non-git flake dirs.
+func IsGitRepo(flakePath string) bool {
+	if _, err := os.Stat(filepath.Join(flakePath, ".git")); err == nil {
+		return true
+	}
+	return false
+}
+
+// flakeURL returns the nix flake URL to reference flakePath.  Git repos use
+// git+file:// URLs so that gitignored directories are not traversed (see
+// PR #43); paths that are not git repos fall back to a plain local path, so
+// labcoat works with flake directories managed by other tools.  Git-only
+// features (revision, dirty state) are unavailable in that case.
+func flakeURL(flakePath, fragment string) string {
+	if IsGitRepo(flakePath) {
+		if fragment == "" {
+			return fmt.Sprintf("git+file://%s", flakePath)
+		}
+		return fmt.Sprintf("git+file://%s#%s", flakePath, fragment)
+	}
+	if fragment == "" {
+		return flakePath
+	}
+	return fmt.Sprintf("%s#%s", flakePath, fragment)
+}
 
 type NamesRequest struct {
 	FlakePath string
 }
 
 func GetNames(data NamesRequest) ([]string, error) {
-	flakeURL := fmt.Sprintf("git+file://%s#nixosConfigurations", data.FlakePath)
-	output, err := nixEval(flakeURL, "builtins.attrNames")
+	url := flakeURL(data.FlakePath, "nixosConfigurations")
+	output, err := nixEval(url, "builtins.attrNames")
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +87,7 @@ func (ti *TargetInfo) SSHDestination() string {
 }
 
 func GetTargetInfo(data TargetInfoRequest) (*TargetInfo, error) {
-	flakeURL := fmt.Sprintf("git+file://%s#nixosConfigurations.%s", data.FlakePath, data.HostName)
+	url := flakeURL(data.FlakePath, fmt.Sprintf("nixosConfigurations.%s", data.HostName))
 
 	// Render the --apply expression.
 	var applyBuf bytes.Buffer
@@ -69,7 +98,7 @@ func GetTargetInfo(data TargetInfoRequest) (*TargetInfo, error) {
 	}
 	applyExpr := applyBuf.String()
 
-	output, err := nixEval(flakeURL, applyExpr)
+	output, err := nixEval(url, applyExpr)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +128,7 @@ type flakeMetadataJSON struct {
 }
 
 func GetFlakeMetadata(flakePath string) (*FlakeMetadata, error) {
-	cmd := exec.Command("nix", "flake", "metadata", "--json", "git+file://"+flakePath)
+	cmd := exec.Command("nix", "flake", "metadata", "--json", flakeURL(flakePath, ""))
 	output, err := cmd.Output()
 	if err != nil {
 		out := ""

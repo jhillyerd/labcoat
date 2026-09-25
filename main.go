@@ -110,6 +110,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "flake-path directory %q must contain flake.nix\n", flakePath)
 		os.Exit(1)
 	}
+	if !nix.IsGitRepo(flakePath) {
+		slog.Warn("flake-dir is not a git repository; behind-count and dirty-deploy features are disabled",
+			"path", flakePath)
+	}
 
 	hosts, nerr := nix.GetNames(nix.NamesRequest{FlakePath: flakePath})
 	if nerr != nil {
