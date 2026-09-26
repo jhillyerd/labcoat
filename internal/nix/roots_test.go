@@ -4,7 +4,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/jhillyerd/labcoat/internal/config"
 )
@@ -54,6 +58,47 @@ func nixStoreCommand(t *testing.T, fn func(storePath, linkPath string) error) {
 	orig := nixStoreRunner
 	nixStoreRunner = fn
 	t.Cleanup(func() { nixStoreRunner = orig })
+}
+
+func TestSystemOutPath(t *testing.T) {
+	// nixRawEvalRunner stub overrides the `nix eval --raw` shell-out so the
+	// test runs without nix.  Returns a cleanup func to restore.
+	nixRawEvalStub := func(t *testing.T, fn func(url string) ([]byte, error)) {
+		t.Helper()
+
+		orig := nixRawEvalRunner
+		nixRawEvalRunner = fn
+		t.Cleanup(func() { nixRawEvalRunner = orig })
+	}
+
+	t.Run("evals toplevel outPath attrpath", func(t *testing.T) {
+		// Regression: nixosConfigurations.<host> exposes NixOS options under
+		// .config, so the derivation is config.system.build.toplevel.
+		// E.g. nixosConfigurations.web01.system.outPath does not exist.
+		nixRawEvalStub(t, func(url string) ([]byte, error) {
+			want := "#nixosConfigurations.web01.config.system.build.toplevel.outPath"
+			if !strings.HasSuffix(url, want) {
+				t.Errorf("eval url = %q, want suffix %q", url, want)
+			}
+			return []byte("/nix/store/abc-nixos-system-web01-1.2.3\n"), nil
+		})
+
+		got, err := SystemOutPath(OutPathRequest{FlakePath: t.TempDir(), HostName: "web01"})
+		require.NoError(t, err)
+		assert.Equal(t, "/nix/store/abc-nixos-system-web01-1.2.3", got,
+			"output must be trimmed")
+	})
+
+	t.Run("eval failure", func(t *testing.T) {
+		nixRawEvalStub(t, func(url string) ([]byte, error) {
+			return nil, &exec.ExitError{Stderr: []byte("error: attribute missing")}
+		})
+
+		_, err := SystemOutPath(OutPathRequest{FlakePath: t.TempDir(), HostName: "web01"})
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "nix eval failed")
+		assert.ErrorContains(t, err, "error: attribute missing")
+	})
 }
 
 func TestRegisterRoot(t *testing.T) {

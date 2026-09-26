@@ -200,7 +200,10 @@ func (m *Model) hostGCRootCmd(host *hostModel) tea.Cmd {
 		})
 		if err != nil {
 			slog.Warn("Failed to resolve system outPath for GC root", "host", host.name, "err", err)
-			return nil
+			return gcRootResultMsg{
+				host: host,
+				text: fmt.Sprintf("GC root not registered: %s", err),
+			}
 		}
 
 		if err := nix.RegisterRoot(nix.RootsDir(m.config), host.name, outPath); err != nil {
@@ -208,12 +211,15 @@ func (m *Model) hostGCRootCmd(host *hostModel) tea.Cmd {
 				"path", outPath, "worker", worker, "err", err)
 			return gcRootResultMsg{
 				host: host,
-				text: fmt.Sprintf("GC root not registered for %s: %s", host.name, err),
+				text: fmt.Sprintf("GC root not registered: %s", err),
 			}
 		}
 
 		slog.Info("Registered GC root", "host", host.name, "path", outPath, "worker", worker)
-		return nil
+		return gcRootResultMsg{
+			host: host,
+			text: fmt.Sprintf("GC root registered: %s", outPath),
+		}
 	}
 }
 
