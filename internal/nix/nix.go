@@ -126,6 +126,36 @@ func GetTargetInfo(data TargetInfoRequest) (*TargetInfo, error) {
 	return &targetInfo, nil
 }
 
+type OutPathRequest struct {
+	FlakePath string
+	HostName  string
+}
+
+// SystemOutPath returns the Nix store path of the system derivation for
+// hostName in flakePath, e.g. /nix/store/abc-nixos-system-host-1.2.3. This is
+// the path that must be registered as a GC root after deployment so that
+// garbage collection cannot delete the running closure.
+func SystemOutPath(data OutPathRequest) (string, error) {
+	url := flakeURL(data.FlakePath,
+		fmt.Sprintf("nixosConfigurations.%s.system.outPath", data.HostName))
+
+	// Not nixEval: --raw returns the string itself, not JSON-quoted.
+	slog.Debug("Running nix eval (raw)", "url", url)
+	cmd := exec.Command("nix", "eval", "--raw", url)
+
+	output, err := cmd.Output()
+	if err != nil {
+		stderr := ""
+		if exit, ok := err.(*exec.ExitError); ok {
+			stderr = "\n\nOutput:\n" + string(exit.Stderr)
+		}
+
+		return "", fmt.Errorf("nix eval failed: %w\n\nURL: %s%s", err, url, stderr)
+	}
+
+	return strings.TrimSpace(string(output)), nil
+}
+
 type FlakeMetadata struct {
 	ResolvedUrl  string
 	Revision     string

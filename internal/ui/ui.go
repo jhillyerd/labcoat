@@ -431,6 +431,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case hostDeployOutputMsg:
 		return m, m.handleHostDeployOutputMsg(msg)
 
+	case gcRootResultMsg:
+		return m, m.handleGCRootResultMsg(msg)
+
 	case hostHoverMsg:
 		return m, m.handleHostHoverMsg(msg)
 
