@@ -16,7 +16,7 @@
 | 2.1 | **Configurable host commands with optional confirmation** | Extend the run-cmd infrastructure (already has history + dialog) to allow user-defined commands per-host in `config.toml`, e.g. `drain kubernetes`, `push to cache`. |
 | 2.2 | **Gather deployment/generation state from targets** | Unchecked README feature. Run `nixos-version` or read `/run/current-system` on each host to determine the active generation. |
 | 2.3 | **Flag out-of-date hosts in list UI** | Depends on #2.2. Compare the host's running generation against the current flake fingerprint to visually flag stale hosts. |
-| 2.4 | **`--add-root` support (#17)** | Prevents GC from invalidating builds. Store one GC root per host, clean up old ones. Particularly important for labs with non-free software or large closures. |
+| 2.4 | ~~**`--add-root` support (#17)**~~ | ✅ Done — After a successful deploy, labcoat registers the system closure as one GC root per host (`nix eval` + `nix-store --add-root --indirect`), replacing the previous root. Failure to register is non-fatal. `[nix] roots-dir` configures storage. |
 | 2.5 | **Run commands locally (#18)** | Allow running host-specific commands on the *local* machine (e.g. push to binary cache). Could share the same configurable-command system from #2.1. |
 
 ## Phase 3 — Workflow

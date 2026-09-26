@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/jhillyerd/labcoat/internal/nix"
 	"github.com/jhillyerd/labcoat/internal/runner"
 	"github.com/jhillyerd/labcoat/internal/store"
 )
@@ -132,6 +133,12 @@ func (m *Model) handleHostDeployOutputMsg(msg hostDeployOutputMsg) tea.Cmd {
 		busyCmd := hostListDecrBusyCmd(host.name, status)
 
 		cmds = append(cmds, logCmd, busyCmd, m.fetchAllHostsBehindCmd())
+
+		// Register the deployed closure as a GC root so local garbage
+		// collection cannot delete it.  Non-fatal.
+		if success {
+			cmds = append(cmds, m.hostGCRootCmd(host))
+		}
 	} else {
 		// Schedule next update.
 		_, updateCmd := srunner.Update(nil)
@@ -160,4 +167,56 @@ func (m *Model) handleHostDeployOutputMsg(msg hostDeployOutputMsg) tea.Cmd {
 	}
 
 	return tea.Batch(cmds...)
+}
+
+// gcRootResultMsg signals the outcome of GC root registration.  Carried as
+// text (not an error) because rooting failure must never fail a deploy.
+type gcRootResultMsg struct {
+	host *hostModel
+	text string
+}
+
+// hostGCRootCmd registers host's deployed system closure as a GC root on the
+// control machine (issue #17).  nixos-rebuild does not pass --add-root, so
+// without this a local `nix-store --gc` can delete the running closure and
+// force a rebuild.  One root per host; the previous root is replaced.
+func (m *Model) hostGCRootCmd(host *hostModel) tea.Cmd {
+	return func() tea.Msg {
+		const gcRootTimeout = 60 * time.Second
+
+		ctx, done := context.WithTimeout(context.Background(), gcRootTimeout)
+		defer done()
+
+		worker, err := m.nixPool.Get(ctx)
+		if err != nil {
+			slog.Warn("Failed to get nix worker for GC root", "host", host.name, "err", err)
+			return nil
+		}
+		defer worker.Done()
+
+		outPath, err := nix.SystemOutPath(nix.OutPathRequest{
+			FlakePath: m.flakePath,
+			HostName:  host.name,
+		})
+		if err != nil {
+			slog.Warn("Failed to resolve system outPath for GC root", "host", host.name, "err", err)
+			return nil
+		}
+
+		if err := nix.RegisterRoot(nix.RootsDir(m.config), host.name, outPath); err != nil {
+			slog.Warn("Failed to register GC root", "host", host.name,
+				"path", outPath, "worker", worker, "err", err)
+			return gcRootResultMsg{
+				host: host,
+				text: fmt.Sprintf("GC root not registered for %s: %s", host.name, err),
+			}
+		}
+
+		slog.Info("Registered GC root", "host", host.name, "path", outPath, "worker", worker)
+		return nil
+	}
+}
+
+func (m *Model) handleGCRootResultMsg(msg gcRootResultMsg) tea.Cmd {
+	return m.hostLogCmd(msg.host, msg.text)
 }
