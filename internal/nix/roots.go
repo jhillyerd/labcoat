@@ -52,18 +52,21 @@ func validRootName(hostName string) bool {
 		!strings.ContainsAny(hostName, `\/`)
 }
 
-// nixStoreRunner registers storePath as a GC root at linkPath.  Tests stub
-// it to run without nix installed.
+// nixStoreRunner registers storePath as a GC root at linkPath, atomically
+// replacing any symlink already there.  Tests stub it to run without nix
+// installed.
 var nixStoreRunner = func(storePath, linkPath string) error {
 	return exec.Command("nix-store", "--realise", storePath,
 		"--add-root", linkPath, "--indirect").Run()
 }
 
 // RegisterRoot records storePath as hostName's only GC root by replacing the
-// previous per-host root symlink.  The old root's path becomes collectable
-// only after the new root is registered and nix garbage collection runs, so
-// there is never more than one labcoat root per host.  Registering is
-// idempotent: re-running it just re-points the same symlink.
+// previous per-host root symlink.  nix-store itself atomically replaces an
+// existing symlink at the link path (temp link plus rename), so there is no
+// pre-delete here: the old closure stays rooted until the moment the new
+// root is registered, and the old path becomes collectable only after nix
+// garbage collection runs.  The indirect registration is keyed by the link
+// path, so repeated deploys never accumulate extra roots.
 //
 // This prevents `nix-store --gc` on the control machine from deleting the
 // closure of a deployed NixOS system (issue #17), because nixos-rebuild
@@ -83,14 +86,6 @@ func RegisterRoot(rootsDir, hostName, storePath string) error {
 	}
 
 	linkPath := HostRootLink(rootsDir, hostName)
-	if old, err := os.Readlink(linkPath); err == nil {
-		// One root per host: drop the previous symlink first so repeated
-		// deploys do not accumulate roots that defeat the GC.
-		slog.Debug("Removing previous GC root", "host", hostName, "old", old)
-		if err := os.Remove(linkPath); err != nil {
-			return fmt.Errorf("remove previous GC root %s: %w", linkPath, err)
-		}
-	}
 
 	// Ensure the path exists in the local store, then create an indirect
 	// root symlink pointing at it.  Realising an already-present path is a

@@ -101,6 +101,16 @@ func TestSystemOutPath(t *testing.T) {
 	})
 }
 
+// emulateNixAddRoot mimics `nix-store --add-root ... --indirect` for tests:
+// it replaces any existing symlink at linkPath with one pointing at
+// storePath, the way nix does via a temp link and an atomic rename.
+func emulateNixAddRoot(storePath, linkPath string) error {
+	if err := os.Remove(linkPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return os.Symlink(storePath, linkPath)
+}
+
 func TestRegisterRoot(t *testing.T) {
 	if _, err := exec.LookPath("true"); err != nil {
 		t.Skip("no /usr/bin/true available")
@@ -139,9 +149,7 @@ func TestRegisterRoot(t *testing.T) {
 		var gotStore, gotLink string
 		nixStoreCommand(t, func(storePath, linkPath string) error {
 			gotStore, gotLink = storePath, linkPath
-			// Emulate `nix-store --add-root ... --indirect`: symlink
-			// pointing at the store path.
-			return os.Symlink(storePath, linkPath)
+			return emulateNixAddRoot(storePath, linkPath)
 		})
 
 		if err := RegisterRoot(rootsDir, "host1", storePath); err != nil {
@@ -178,7 +186,7 @@ func TestRegisterRoot(t *testing.T) {
 		}
 
 		nixStoreCommand(t, func(storePath, linkPath string) error {
-			return os.Symlink(storePath, linkPath)
+			return emulateNixAddRoot(storePath, linkPath)
 		})
 
 		if err := RegisterRoot(rootsDir, "host1", newPath); err != nil {
@@ -201,6 +209,28 @@ func TestRegisterRoot(t *testing.T) {
 		if len(entries) != 1 || entries[0].Name() != "host1" {
 			t.Errorf("unexpected root dir entries: %v", entries)
 		}
+	})
+
+	t.Run("failed registration keeps previous root", func(t *testing.T) {
+		rootsDir := t.TempDir()
+		oldPath := "/nix/store/aaa-old-system-1"
+
+		link := HostRootLink(rootsDir, "host1")
+		require.NoError(t, os.MkdirAll(filepath.Dir(link), 0700))
+		require.NoError(t, os.Symlink(oldPath, link))
+
+		nixStoreCommand(t, func(storePath, linkPath string) error {
+			return os.ErrPermission
+		})
+
+		err := RegisterRoot(rootsDir, "host1", "/nix/store/bbb-new-system-2")
+		require.Error(t, err)
+
+		// The old root must survive a failed registration so the deployed
+		// closure stays protected until the new root is in place.
+		target, lerr := os.Readlink(link)
+		require.NoError(t, lerr)
+		assert.Equal(t, oldPath, target)
 	})
 
 	t.Run("nix-store failure leaves no false success", func(t *testing.T) {
