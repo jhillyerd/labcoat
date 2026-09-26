@@ -93,6 +93,8 @@ type hostModel struct {
 		cancel       func()
 		fingerprint  string // Captured at deploy start to avoid drift.
 		outPath      string // System outPath resolved at deploy start; binds the post-deploy GC root to the deployed closure.
+		outPathDone  bool   // Whether this deploy's outPath resolution concluded; empty outPath then means it failed.
+		rootPending  bool   // Successful deploy completed before its outPath resolved; register GC root when it arrives.
 		deployGen    int    // Deploy sequence number; discards late outPath resolutions from superseded deploys.
 	}
 	log struct {

@@ -21,7 +21,8 @@ type hostDeployMsg struct {
 
 // hostOutPathMsg delivers the system outPath resolved for one specific
 // deploy, keyed by that deploy's generation so resolutions arriving after a
-// newer deploy started are discarded.
+// newer deploy started are discarded.  An empty outPath reports that this
+// deploy's resolution failed, closing out any deferred GC-root registration.
 type hostOutPathMsg struct {
 	host    *hostModel
 	gen     int
@@ -88,6 +89,8 @@ func (m *Model) handleHostDeployMsg(msg hostDeployMsg) tea.Cmd {
 	host.deploy.cancel = cancel
 	host.deploy.fingerprint = m.flakeFingerprint // Capture current fingerprint.
 	host.deploy.outPath = ""                     // Resolved per deploy, binds the post-deploy GC root.
+	host.deploy.outPathDone = false              // Reset per deploy; empty outPath alone is ambiguous.
+	host.deploy.rootPending = false              // Superseded deploy's deferred root must not fire.
 
 	// Init status display.
 	intro := lipgloss.NewStyle().
@@ -110,8 +113,9 @@ func (m *Model) handleHostDeployMsg(msg hostDeployMsg) tea.Cmd {
 // concurrently with nixos-rebuild, so the GC root registered after a
 // successful deploy pins exactly the closure that deploy built instead of a
 // fresh evaluation of the (mutable) flake path, which could have drifted if
-// the flake changed during the build.  Non-fatal on failure: GC root
-// registration then falls back to evaluating at registration time.
+// the flake changed during the build.  Always delivers a result message,
+// empty outPath on failure, so a deploy that completes first can defer its
+// GC-root registration until this resolves.
 func (m *Model) hostOutPathCmd(host *hostModel, gen int) tea.Cmd {
 	return func() tea.Msg {
 		const outPathTimeout = 60 * time.Second
@@ -122,7 +126,7 @@ func (m *Model) hostOutPathCmd(host *hostModel, gen int) tea.Cmd {
 		worker, err := m.nixPool.Get(ctx)
 		if err != nil {
 			slog.Warn("Failed to get nix worker for outPath resolution", "host", host.name, "err", err)
-			return nil
+			return hostOutPathMsg{host: host, gen: gen}
 		}
 		defer worker.Done()
 
@@ -133,7 +137,7 @@ func (m *Model) hostOutPathCmd(host *hostModel, gen int) tea.Cmd {
 		if err != nil {
 			slog.Warn("Failed to resolve system outPath for deploy",
 				"host", host.name, "worker", worker, "err", err)
-			return nil
+			return hostOutPathMsg{host: host, gen: gen}
 		}
 
 		return hostOutPathMsg{host: host, gen: gen, outPath: outPath}
@@ -148,6 +152,17 @@ func (m *Model) handleHostOutPathMsg(msg hostOutPathMsg) tea.Cmd {
 		return nil
 	}
 	msg.host.deploy.outPath = msg.outPath
+	msg.host.deploy.outPathDone = true
+
+	// A successful deploy may have completed before this resolution
+	// arrived; close out its deferred GC-root registration now.
+	if msg.host.deploy.rootPending {
+		msg.host.deploy.rootPending = false
+		if msg.outPath == "" {
+			return m.hostLogCmd(msg.host, "GC root not registered: system outPath resolution failed")
+		}
+		return m.hostGCRootCmd(msg.host, msg.outPath)
+	}
 	return nil
 }
 
@@ -198,19 +213,25 @@ func (m *Model) handleHostDeployOutputMsg(msg hostDeployOutputMsg) tea.Cmd {
 		cmds = append(cmds, logCmd, busyCmd, m.fetchAllHostsBehindCmd())
 
 		// Register the deployed closure as a GC root so local garbage
-		// collection cannot delete it.  Non-fatal.  Passing the outPath
-		// captured at deploy start (if resolved by now) pins the root to the
-		// closure this deploy built, not to a fresh evaluation.
+		// collection cannot delete it.  Non-fatal.  Only the outPath resolved
+		// for this deploy may be used, pinning the root to the closure this
+		// deploy built; if it has not arrived yet, registration is deferred to
+		// hostOutPathMsg rather than re-evaluating the (mutable) flake here.
 		if success {
 			// A newer deploy may have started before this completion was
 			// processed, replacing the runner and resetting outPath; only the
 			// current deployment may register a root (it does so on its own
-			// completion).  Still-current completions keep the empty-outPath
-			// fallback inside hostGCRootCmd.
+			// completion).
 			if msg.runner != host.deploy.runner || msg.gen != host.deploy.deployGen {
 				slog.Debug("Skipping GC root for superseded deploy completion", "host", host.name)
-			} else {
+			} else if host.deploy.outPath != "" {
 				cmds = append(cmds, m.hostGCRootCmd(host, host.deploy.outPath))
+			} else if host.deploy.outPathDone {
+				// Resolution already concluded empty (failed); non-fatal.
+				cmds = append(cmds, m.hostLogCmd(host, "GC root not registered: system outPath resolution failed"))
+			} else {
+				// Resolution still in flight; defer to handleHostOutPathMsg.
+				host.deploy.rootPending = true
 			}
 		}
 	} else {
@@ -257,10 +278,20 @@ type gcRootResultMsg struct {
 //
 // outPath is the system outPath captured when the deploy started, binding
 // the root to the closure that deploy built even if the flake has since
-// changed; when empty (capture unfinished or failed) the flake is evaluated
-// here instead, accepting the drift window that implies.
+// changed; callers must not pass an empty outPath — deferring registration
+// (or failing non-fatally) is handled by the deploy completion path, never a
+// fresh evaluation of the current flake.
 func (m *Model) hostGCRootCmd(host *hostModel, outPath string) tea.Cmd {
 	return func() tea.Msg {
+		if outPath == "" {
+			// Defensive: registration is deferred or skipped before this.
+			slog.Error("hostGCRootCmd called with empty outPath (bug)", "host", host.name)
+			return gcRootResultMsg{
+				host: host,
+				text: "GC root not registered: no system outPath for deploy",
+			}
+		}
+
 		const gcRootTimeout = 60 * time.Second
 
 		ctx, done := context.WithTimeout(context.Background(), gcRootTimeout)
@@ -272,22 +303,6 @@ func (m *Model) hostGCRootCmd(host *hostModel, outPath string) tea.Cmd {
 			return nil
 		}
 		defer worker.Done()
-
-		if outPath == "" {
-			// No captured outPath (very fast build, or resolution
-			// failed); evaluate the current flake state as a fallback.
-			outPath, err = nix.SystemOutPath(ctx, nix.OutPathRequest{
-				FlakePath: m.flakePath,
-				HostName:  host.name,
-			})
-			if err != nil {
-				slog.Warn("Failed to resolve system outPath for GC root", "host", host.name, "err", err)
-				return gcRootResultMsg{
-					host: host,
-					text: fmt.Sprintf("GC root not registered: %s", err),
-				}
-			}
-		}
 
 		if err := nix.RegisterRoot(ctx, nix.RootsDir(m.config), host.name, outPath); err != nil {
 			slog.Warn("Failed to register GC root", "host", host.name,
