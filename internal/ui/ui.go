@@ -50,6 +50,7 @@ type Model struct {
 	viewMode         int  // Current UI mode.
 	flakePath        string
 	flakeFingerprint string // Current flake fingerprint, updated by metadata fetch.
+	isGit            bool   // Flake dir is a git repo; false disables git-only features.
 	hostList         hostListModel
 	hosts            map[string]*hostModel
 	selectedHost     *hostModel
@@ -122,7 +123,7 @@ type dim struct {
 }
 
 func New(
-	conf config.Config, keys config.KeyMap, flakePath string, hostNames []string, db *store.BoltDB,
+	conf config.Config, keys config.KeyMap, flakePath string, hostNames []string, db *store.BoltDB, isGit bool,
 ) Model {
 	hostList := newHostList(hostNames)
 	hostList.list.KeyMap.CursorUp = keys.Up
@@ -150,6 +151,7 @@ func New(
 		db:        db,
 		viewMode:  viewModeHosts,
 		flakePath: flakePath,
+		isGit:     isGit,
 		hostList:  hostList,
 		hosts:     hosts,
 		nixPool:   npool.New("nix", 2),
@@ -228,12 +230,15 @@ type textDisplayMsg struct {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		m.hostList.Init(),
 		m.spinner.Tick,
-		m.fetchFlakeMetadataCmd(),
-		m.fetchAllHostsBehindCmd(),
-	)
+	}
+	// Git-only features (flake metadata, behind-counts) need a git repo.
+	if m.isGit {
+		cmds = append(cmds, m.fetchFlakeMetadataCmd(), m.fetchAllHostsBehindCmd())
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -722,6 +727,9 @@ func (m *Model) handleHostSSHCheckMsg(msg hostSSHCheckMsg) tea.Cmd {
 }
 
 func (m *Model) fetchFlakeMetadataCmd() tea.Cmd {
+	if !m.isGit {
+		return nil // Git-only feature; no fingerprint or dirty state to track.
+	}
 	return func() tea.Msg {
 		const timeout = 30 * time.Second
 
@@ -1199,6 +1207,9 @@ func (m *Model) addToCmdHistory(cmd string) {
 // fetchAllHostsBehindCmd returns a command that computes how many clean commits
 // behind the latest each host's most recent deployment is.
 func (m *Model) fetchAllHostsBehindCmd() tea.Cmd {
+	if !m.isGit {
+		return nil // Git-only feature; behind counts are unknown without revisions.
+	}
 	hostNames := make([]string, 0, len(m.hosts))
 	for name := range m.hosts {
 		hostNames = append(hostNames, name)

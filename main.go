@@ -110,7 +110,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "flake-path directory %q must contain flake.nix\n", flakePath)
 		os.Exit(1)
 	}
-	if !nix.IsGitRepo(flakePath) {
+	isGit := nix.IsGitRepo(flakePath)
+	if !isGit {
 		slog.Warn("flake-dir is not a git repository; behind-count and dirty-deploy features are disabled",
 			"path", flakePath)
 	}
@@ -126,7 +127,7 @@ func main() {
 	}
 
 	// Launch UI.
-	p := tea.NewProgram(ui.New(*conf, config.DefaultKeyMap, flakePath, hosts, dbs))
+	p := tea.NewProgram(ui.New(*conf, config.DefaultKeyMap, flakePath, hosts, dbs, isGit))
 	go p.Send(p)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())

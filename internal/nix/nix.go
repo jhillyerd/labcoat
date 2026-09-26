@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"text/template"
 
 	"github.com/jhillyerd/labcoat/internal/config"
@@ -15,11 +16,25 @@ import (
 
 // IsGitRepo reports whether flakePath is the root of a git repository.
 // Other packages use it to disable git-only features for non-git flake dirs.
+// An empty or missing flakePath is reported as false without shelling out.
 func IsGitRepo(flakePath string) bool {
-	if _, err := os.Stat(filepath.Join(flakePath, ".git")); err == nil {
-		return true
+	if flakePath == "" {
+		return false
 	}
-	return false
+	if _, err := os.Stat(filepath.Join(flakePath, ".git")); err != nil {
+		return false
+	}
+
+	// A present .git entry is not sufficient: stale directories and broken
+	// worktree/submodule pointers can leave one behind without a usable
+	// repository.  Confirm git itself recognizes the tree.
+	cmd := exec.Command("git", "-C", flakePath, "rev-parse", "--is-inside-work-tree")
+	output, err := cmd.Output()
+	if err != nil {
+		slog.Debug("git rev-parse rejected flake dir", "path", flakePath, "err", err)
+		return false
+	}
+	return strings.TrimSpace(string(output)) == "true"
 }
 
 // flakeURL returns the nix flake URL to reference flakePath.  Git repos use

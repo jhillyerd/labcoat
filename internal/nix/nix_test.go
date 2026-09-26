@@ -33,13 +33,45 @@ func TestIsGitRepo(t *testing.T) {
 		t.Errorf("IsGitRepo(%q) = false, want true after git init", dir)
 	}
 
-	// A .git file (worktree/submodule pointer) still counts.
-	fileDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(fileDir, ".git"), []byte("gitdir: /elsewhere\n"), 0600); err != nil {
+	// A linked worktree has a .git pointer file and must count as a repo.
+	repoDir := t.TempDir()
+	gitInit(t, repoDir)
+	if err := os.WriteFile(filepath.Join(repoDir, "flake.nix"), []byte("{}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if !IsGitRepo(fileDir) {
-		t.Errorf("IsGitRepo(%q) = false, want true for .git file", fileDir)
+	if err := exec.Command("git", "-C", repoDir, "add", "flake.nix").Run(); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := exec.Command("git", "-C", repoDir,
+		"-c", "user.email=labcoat@example.com", "-c", "user.name=labcoat",
+		"commit", "-q", "-m", "init").Run(); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+	worktreeDir := filepath.Join(t.TempDir(), "wt")
+	if err := exec.Command("git", "-C", repoDir, "worktree", "add", "-q", worktreeDir).Run(); err != nil {
+		t.Fatalf("git worktree add: %v", err)
+	}
+	if !IsGitRepo(worktreeDir) {
+		t.Errorf("IsGitRepo(%q) = false, want true for linked worktree", worktreeDir)
+	}
+
+	// A .git file with a broken pointer is NOT a usable repo: the false
+	// positive here would route the dir back to git+file:// URLs.
+	staleDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(staleDir, ".git"), []byte("gitdir: /nonexistent-gitdir\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if IsGitRepo(staleDir) {
+		t.Errorf("IsGitRepo(%q) = true, want false for broken .git pointer", staleDir)
+	}
+
+	// A .git directory that is not a real repository (stale dir) is not a repo.
+	fakeDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(fakeDir, ".git"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if IsGitRepo(fakeDir) {
+		t.Errorf("IsGitRepo(%q) = true, want false for fake .git dir", fakeDir)
 	}
 
 	// A nonexistent path is not a git repo.
@@ -117,5 +149,15 @@ func TestFlakeURLNoGitRegression(t *testing.T) {
 	}
 	if got := flakeURL(dir, ""); got != dir {
 		t.Errorf("non-git flake dir metadata URL = %q, want plain path %q (issue #49)", got, dir)
+	}
+
+	// A stale .git entry (broken pointer) must fall back to the plain path,
+	// not git+file://, otherwise nix fails with "not a git repository".
+	staleDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(staleDir, ".git"), []byte("gitdir: /nonexistent-gitdir\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := flakeURL(staleDir, "nixosConfigurations"); got != staleDir+"#nixosConfigurations" {
+		t.Errorf("stale-.git flake dir produced URL %q, want plain path (issue #49)", got)
 	}
 }
