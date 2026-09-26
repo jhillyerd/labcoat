@@ -28,10 +28,14 @@ type hostOutPathMsg struct {
 	outPath string
 }
 
-// Sent when the runner has new output/status to display.
+// Sent when the runner has new output/status to display.  runner and gen
+// identify the deployment that emitted the update, so completion handling
+// can discard finals superseded by a newer deploy.
 type hostDeployOutputMsg struct {
-	host  *hostModel
-	final bool
+	host   *hostModel
+	runner *runner.Model
+	gen    int
+	final  bool
 }
 
 func (m *Model) hostDeployCmd(host *hostModel, action string) tea.Cmd {
@@ -56,8 +60,11 @@ func (m *Model) handleHostDeployMsg(msg hostDeployMsg) tea.Cmd {
 		return nil
 	}
 
+	host.deploy.deployGen++ // Invalidate in-flight resolutions and completions.
+	deployGen := host.deploy.deployGen
+
 	onUpdate := func(r *runner.Model) tea.Msg {
-		return hostDeployOutputMsg{host: host, final: r.Closed()}
+		return hostDeployOutputMsg{host: host, runner: r, gen: deployGen, final: r.Closed()}
 	}
 
 	// Construct nixos-rebuild command line.
@@ -80,7 +87,6 @@ func (m *Model) handleHostDeployMsg(msg hostDeployMsg) tea.Cmd {
 	host.deploy.runner = srunner
 	host.deploy.cancel = cancel
 	host.deploy.fingerprint = m.flakeFingerprint // Capture current fingerprint.
-	host.deploy.deployGen++                      // Invalidate in-flight outPath resolutions.
 	host.deploy.outPath = ""                     // Resolved per deploy, binds the post-deploy GC root.
 
 	// Init status display.
@@ -196,7 +202,16 @@ func (m *Model) handleHostDeployOutputMsg(msg hostDeployOutputMsg) tea.Cmd {
 		// captured at deploy start (if resolved by now) pins the root to the
 		// closure this deploy built, not to a fresh evaluation.
 		if success {
-			cmds = append(cmds, m.hostGCRootCmd(host, host.deploy.outPath))
+			// A newer deploy may have started before this completion was
+			// processed, replacing the runner and resetting outPath; only the
+			// current deployment may register a root (it does so on its own
+			// completion).  Still-current completions keep the empty-outPath
+			// fallback inside hostGCRootCmd.
+			if msg.runner != host.deploy.runner || msg.gen != host.deploy.deployGen {
+				slog.Debug("Skipping GC root for superseded deploy completion", "host", host.name)
+			} else {
+				cmds = append(cmds, m.hostGCRootCmd(host, host.deploy.outPath))
+			}
 		}
 	} else {
 		// Schedule next update.
