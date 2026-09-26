@@ -1,6 +1,7 @@
 package nix
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -53,10 +54,10 @@ func validRootName(hostName string) bool {
 }
 
 // nixStoreRunner registers storePath as a GC root at linkPath, atomically
-// replacing any symlink already there.  Tests stub it to run without nix
-// installed.
-var nixStoreRunner = func(storePath, linkPath string) error {
-	return exec.Command("nix-store", "--realise", storePath,
+// replacing any symlink already there, killing the subprocess when ctx is
+// done.  Tests stub it to run without nix installed.
+var nixStoreRunner = func(ctx context.Context, storePath, linkPath string) error {
+	return exec.CommandContext(ctx, "nix-store", "--realise", storePath,
 		"--add-root", linkPath, "--indirect").Run()
 }
 
@@ -70,8 +71,10 @@ var nixStoreRunner = func(storePath, linkPath string) error {
 //
 // This prevents `nix-store --gc` on the control machine from deleting the
 // closure of a deployed NixOS system (issue #17), because nixos-rebuild
-// does not pass --add-root.
-func RegisterRoot(rootsDir, hostName, storePath string) error {
+// does not pass --add-root.  ctx bounds the nix-store subprocess so a
+// stalled command cannot hold the caller's resources (e.g. a pool worker)
+// indefinitely.
+func RegisterRoot(ctx context.Context, rootsDir, hostName, storePath string) error {
 	if !validRootName(hostName) {
 		return fmt.Errorf("host name %q is not usable as a GC root link name", hostName)
 	}
@@ -92,7 +95,7 @@ func RegisterRoot(rootsDir, hostName, storePath string) error {
 	// no-op, so this costs nothing when the deploy built locally.
 	slog.Debug("Registering GC root", "host", hostName,
 		"path", storePath, "link", linkPath)
-	if err := nixStoreRunner(storePath, linkPath); err != nil {
+	if err := nixStoreRunner(ctx, storePath, linkPath); err != nil {
 		return fmt.Errorf("nix-store --add-root failed: %w", err)
 	}
 

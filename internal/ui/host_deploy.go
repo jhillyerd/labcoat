@@ -120,7 +120,7 @@ func (m *Model) hostOutPathCmd(host *hostModel, gen int) tea.Cmd {
 		}
 		defer worker.Done()
 
-		outPath, err := nix.SystemOutPath(nix.OutPathRequest{
+		outPath, err := nix.SystemOutPath(ctx, nix.OutPathRequest{
 			FlakePath: m.flakePath,
 			HostName:  host.name,
 		})
@@ -261,7 +261,7 @@ func (m *Model) hostGCRootCmd(host *hostModel, outPath string) tea.Cmd {
 		if outPath == "" {
 			// No captured outPath (very fast build, or resolution
 			// failed); evaluate the current flake state as a fallback.
-			outPath, err = nix.SystemOutPath(nix.OutPathRequest{
+			outPath, err = nix.SystemOutPath(ctx, nix.OutPathRequest{
 				FlakePath: m.flakePath,
 				HostName:  host.name,
 			})
@@ -274,7 +274,7 @@ func (m *Model) hostGCRootCmd(host *hostModel, outPath string) tea.Cmd {
 			}
 		}
 
-		if err := nix.RegisterRoot(nix.RootsDir(m.config), host.name, outPath); err != nil {
+		if err := nix.RegisterRoot(ctx, nix.RootsDir(m.config), host.name, outPath); err != nil {
 			slog.Warn("Failed to register GC root", "host", host.name,
 				"path", outPath, "worker", worker, "err", err)
 			return gcRootResultMsg{

@@ -1,6 +1,7 @@
 package nix
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -52,7 +53,7 @@ func TestHostRootLink(t *testing.T) {
 
 // nixStoreCommand overrides how RegisterRoot invokes nix-store; tests set it
 // to a stub.  Returns a cleanup func to restore.
-func nixStoreCommand(t *testing.T, fn func(storePath, linkPath string) error) {
+func nixStoreCommand(t *testing.T, fn func(ctx context.Context, storePath, linkPath string) error) {
 	t.Helper()
 
 	orig := nixStoreRunner
@@ -63,7 +64,7 @@ func nixStoreCommand(t *testing.T, fn func(storePath, linkPath string) error) {
 func TestSystemOutPath(t *testing.T) {
 	// nixRawEvalRunner stub overrides the `nix eval --raw` shell-out so the
 	// test runs without nix.  Returns a cleanup func to restore.
-	nixRawEvalStub := func(t *testing.T, fn func(url string) ([]byte, error)) {
+	nixRawEvalStub := func(t *testing.T, fn func(ctx context.Context, url string) ([]byte, error)) {
 		t.Helper()
 
 		orig := nixRawEvalRunner
@@ -75,7 +76,7 @@ func TestSystemOutPath(t *testing.T) {
 		// Regression: nixosConfigurations.<host> exposes NixOS options under
 		// .config, so the derivation is config.system.build.toplevel.
 		// E.g. nixosConfigurations.web01.system.outPath does not exist.
-		nixRawEvalStub(t, func(url string) ([]byte, error) {
+		nixRawEvalStub(t, func(ctx context.Context, url string) ([]byte, error) {
 			want := "#nixosConfigurations.web01.config.system.build.toplevel.outPath"
 			if !strings.HasSuffix(url, want) {
 				t.Errorf("eval url = %q, want suffix %q", url, want)
@@ -83,18 +84,18 @@ func TestSystemOutPath(t *testing.T) {
 			return []byte("/nix/store/abc-nixos-system-web01-1.2.3\n"), nil
 		})
 
-		got, err := SystemOutPath(OutPathRequest{FlakePath: t.TempDir(), HostName: "web01"})
+		got, err := SystemOutPath(t.Context(), OutPathRequest{FlakePath: t.TempDir(), HostName: "web01"})
 		require.NoError(t, err)
 		assert.Equal(t, "/nix/store/abc-nixos-system-web01-1.2.3", got,
 			"output must be trimmed")
 	})
 
 	t.Run("eval failure", func(t *testing.T) {
-		nixRawEvalStub(t, func(url string) ([]byte, error) {
+		nixRawEvalStub(t, func(ctx context.Context, url string) ([]byte, error) {
 			return nil, &exec.ExitError{Stderr: []byte("error: attribute missing")}
 		})
 
-		_, err := SystemOutPath(OutPathRequest{FlakePath: t.TempDir(), HostName: "web01"})
+		_, err := SystemOutPath(t.Context(), OutPathRequest{FlakePath: t.TempDir(), HostName: "web01"})
 		require.Error(t, err)
 		assert.ErrorContains(t, err, "nix eval failed")
 		assert.ErrorContains(t, err, "error: attribute missing")
@@ -118,25 +119,25 @@ func TestRegisterRoot(t *testing.T) {
 
 	t.Run("rejects non-store path", func(t *testing.T) {
 		rootsDir := t.TempDir()
-		nixStoreCommand(t, func(storePath, linkPath string) error {
+		nixStoreCommand(t, func(ctx context.Context, storePath, linkPath string) error {
 			t.Fatal("nix-store should not run for invalid path")
 			return nil
 		})
 
-		if err := RegisterRoot(rootsDir, "host1", "relative/path"); err == nil {
+		if err := RegisterRoot(t.Context(), rootsDir, "host1", "relative/path"); err == nil {
 			t.Error("RegisterRoot(relative) = nil, want error")
 		}
 	})
 
 	t.Run("rejects unusable host names", func(t *testing.T) {
 		rootsDir := t.TempDir()
-		nixStoreCommand(t, func(storePath, linkPath string) error {
+		nixStoreCommand(t, func(ctx context.Context, storePath, linkPath string) error {
 			t.Fatal("nix-store should not run for invalid host name")
 			return nil
 		})
 
 		for _, name := range []string{"", ".", "..", "a/b", "a\\b", "../evil"} {
-			if err := RegisterRoot(rootsDir, name, "/nix/store/abc-system-1"); err == nil {
+			if err := RegisterRoot(t.Context(), rootsDir, name, "/nix/store/abc-system-1"); err == nil {
 				t.Errorf("RegisterRoot(%q) = nil, want error", name)
 			}
 		}
@@ -147,12 +148,12 @@ func TestRegisterRoot(t *testing.T) {
 		storePath := "/nix/store/abc123-nixos-system-host1-1.2.3"
 
 		var gotStore, gotLink string
-		nixStoreCommand(t, func(storePath, linkPath string) error {
+		nixStoreCommand(t, func(ctx context.Context, storePath, linkPath string) error {
 			gotStore, gotLink = storePath, linkPath
 			return emulateNixAddRoot(storePath, linkPath)
 		})
 
-		if err := RegisterRoot(rootsDir, "host1", storePath); err != nil {
+		if err := RegisterRoot(t.Context(), rootsDir, "host1", storePath); err != nil {
 			t.Fatalf("RegisterRoot: %v", err)
 		}
 
@@ -185,11 +186,11 @@ func TestRegisterRoot(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		nixStoreCommand(t, func(storePath, linkPath string) error {
+		nixStoreCommand(t, func(ctx context.Context, storePath, linkPath string) error {
 			return emulateNixAddRoot(storePath, linkPath)
 		})
 
-		if err := RegisterRoot(rootsDir, "host1", newPath); err != nil {
+		if err := RegisterRoot(t.Context(), rootsDir, "host1", newPath); err != nil {
 			t.Fatalf("RegisterRoot: %v", err)
 		}
 
@@ -219,11 +220,11 @@ func TestRegisterRoot(t *testing.T) {
 		require.NoError(t, os.MkdirAll(filepath.Dir(link), 0700))
 		require.NoError(t, os.Symlink(oldPath, link))
 
-		nixStoreCommand(t, func(storePath, linkPath string) error {
+		nixStoreCommand(t, func(ctx context.Context, storePath, linkPath string) error {
 			return os.ErrPermission
 		})
 
-		err := RegisterRoot(rootsDir, "host1", "/nix/store/bbb-new-system-2")
+		err := RegisterRoot(t.Context(), rootsDir, "host1", "/nix/store/bbb-new-system-2")
 		require.Error(t, err)
 
 		// The old root must survive a failed registration so the deployed
@@ -235,11 +236,11 @@ func TestRegisterRoot(t *testing.T) {
 
 	t.Run("nix-store failure leaves no false success", func(t *testing.T) {
 		rootsDir := t.TempDir()
-		nixStoreCommand(t, func(storePath, linkPath string) error {
+		nixStoreCommand(t, func(ctx context.Context, storePath, linkPath string) error {
 			return os.ErrPermission
 		})
 
-		err := RegisterRoot(rootsDir, "host1", "/nix/store/abc-system-1")
+		err := RegisterRoot(t.Context(), rootsDir, "host1", "/nix/store/abc-system-1")
 		if err == nil {
 			t.Fatal("RegisterRoot = nil, want error when nix-store fails")
 		}
@@ -251,12 +252,12 @@ func TestRegisterRoot(t *testing.T) {
 
 	t.Run("rejects real-file root (non-symlink)", func(t *testing.T) {
 		rootsDir := t.TempDir()
-		nixStoreCommand(t, func(storePath, linkPath string) error {
+		nixStoreCommand(t, func(ctx context.Context, storePath, linkPath string) error {
 			// Emulate --indirect omitted: a real file instead of a link.
 			return os.WriteFile(linkPath, []byte("not a link"), 0600)
 		})
 
-		err := RegisterRoot(rootsDir, "host1", "/nix/store/abc-system-1")
+		err := RegisterRoot(t.Context(), rootsDir, "host1", "/nix/store/abc-system-1")
 		if err == nil {
 			t.Fatal("RegisterRoot = nil, want error for non-symlink root")
 		}

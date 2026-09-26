@@ -2,6 +2,7 @@ package nix
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -134,19 +135,20 @@ type OutPathRequest struct {
 // SystemOutPath returns the Nix store path of the system derivation for
 // hostName in flakePath, e.g. /nix/store/abc-nixos-system-host-1.2.3. This is
 // the path that must be registered as a GC root after deployment so that
-// garbage collection cannot delete the running closure.
+// garbage collection cannot delete the running closure.  ctx bounds the
+// evaluation subprocess, canceling it if it stalls.
 //
 // Note the eval result of lib.nixosSystem exposes NixOS options under
 // .config, so the derivation nixos-rebuild activates is
 // nixosConfigurations.<host>.config.system.build.toplevel; the top-level
 // result has no .system attribute.
-func SystemOutPath(data OutPathRequest) (string, error) {
+func SystemOutPath(ctx context.Context, data OutPathRequest) (string, error) {
 	url := flakeURL(data.FlakePath,
 		fmt.Sprintf("nixosConfigurations.%s.config.system.build.toplevel.outPath", data.HostName))
 
 	// Not nixEval: --raw returns the string itself, not JSON-quoted.
 	slog.Debug("Running nix eval (raw)", "url", url)
-	output, err := nixRawEvalRunner(url)
+	output, err := nixRawEvalRunner(ctx, url)
 	if err != nil {
 		stderr := ""
 		if exit, ok := err.(*exec.ExitError); ok {
@@ -207,10 +209,10 @@ func GetFlakeMetadata(flakePath string) (*FlakeMetadata, error) {
 	return meta, nil
 }
 
-// nixRawEvalRunner shells out to `nix eval --raw` for url.  Tests stub it
-// to run without nix installed.
-var nixRawEvalRunner = func(url string) ([]byte, error) {
-	return exec.Command("nix", "eval", "--raw", url).Output()
+// nixRawEvalRunner shells out to `nix eval --raw` for url, killing the
+// subprocess when ctx is done.  Tests stub it to run without nix installed.
+var nixRawEvalRunner = func(ctx context.Context, url string) ([]byte, error) {
+	return exec.CommandContext(ctx, "nix", "eval", "--raw", url).Output()
 }
 
 func nixEval(flakeURL string, applyExpr string) ([]byte, error) {
