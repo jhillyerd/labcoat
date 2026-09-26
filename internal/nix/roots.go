@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/jhillyerd/labcoat/internal/config"
 )
@@ -35,9 +36,20 @@ func RootsDir(cfg config.Config) string {
 }
 
 // HostRootLink returns the path of the single GC root symlink for hostName
-// inside rootsDir.  The directory must exist before RegisterRoot is called.
+// inside rootsDir, named for the host itself, e.g. .../labcoat/roots/web01.
+// The nix-store link name is arbitrary; GC tracking comes from the indirect
+// registration, not the name.  hostName must pass validRootName.
 func HostRootLink(rootsDir, hostName string) string {
-	return filepath.Join(rootsDir, "hosts", hostName, "result")
+	return filepath.Join(rootsDir, hostName)
+}
+
+// validRootName reports whether hostName is safe to embed as a single path
+// element in a GC root link path.  Hostnames come from nixosConfigurations
+// attrNames, which in practice are attrpath-safe (letters, digits, `-`,
+// `_`), but a pathological name must never escape the roots directory.
+func validRootName(hostName string) bool {
+	return hostName != "" && hostName != "." && hostName != ".." &&
+		!strings.ContainsAny(hostName, `\/`)
 }
 
 // nixStoreRunner registers storePath as a GC root at linkPath.  Tests stub
@@ -57,6 +69,10 @@ var nixStoreRunner = func(storePath, linkPath string) error {
 // closure of a deployed NixOS system (issue #17), because nixos-rebuild
 // does not pass --add-root.
 func RegisterRoot(rootsDir, hostName, storePath string) error {
+	if !validRootName(hostName) {
+		return fmt.Errorf("host name %q is not usable as a GC root link name", hostName)
+	}
+
 	if !filepath.IsAbs(storePath) {
 		return fmt.Errorf("refusing to register non-store path as GC root: %q", storePath)
 	}

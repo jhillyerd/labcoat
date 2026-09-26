@@ -44,7 +44,7 @@ func TestRootsDir(t *testing.T) {
 }
 
 func TestHostRootLink(t *testing.T) {
-	want := filepath.Join("/roots", "hosts", "web01", "result")
+	want := filepath.Join("/roots", "web01")
 	if got := HostRootLink("/roots", "web01"); got != want {
 		t.Errorf("HostRootLink = %q, want %q", got, want)
 	}
@@ -118,6 +118,20 @@ func TestRegisterRoot(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects unusable host names", func(t *testing.T) {
+		rootsDir := t.TempDir()
+		nixStoreCommand(t, func(storePath, linkPath string) error {
+			t.Fatal("nix-store should not run for invalid host name")
+			return nil
+		})
+
+		for _, name := range []string{"", ".", "..", "a/b", "a\\b", "../evil"} {
+			if err := RegisterRoot(rootsDir, name, "/nix/store/abc-system-1"); err == nil {
+				t.Errorf("RegisterRoot(%q) = nil, want error", name)
+			}
+		}
+	})
+
 	t.Run("creates link dir and indirect root", func(t *testing.T) {
 		rootsDir := t.TempDir()
 		storePath := "/nix/store/abc123-nixos-system-host1-1.2.3"
@@ -179,20 +193,13 @@ func TestRegisterRoot(t *testing.T) {
 			t.Errorf("root symlink -> %q, want new path %q", target, newPath)
 		}
 
-		// Exactly one host dir must exist with exactly one root.
-		hostDirs, err := os.ReadDir(filepath.Join(rootsDir, "hosts"))
+		// Exactly one root per host: rootsDir holds only host1's link.
+		entries, err := os.ReadDir(rootsDir)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(hostDirs) != 1 || hostDirs[0].Name() != "host1" {
-			t.Errorf("unexpected host root dirs: %v", hostDirs)
-		}
-		roots, err := os.ReadDir(filepath.Join(rootsDir, "hosts", "host1"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(roots) != 1 {
-			t.Errorf("host has %d roots, want exactly 1", len(roots))
+		if len(entries) != 1 || entries[0].Name() != "host1" {
+			t.Errorf("unexpected root dir entries: %v", entries)
 		}
 	})
 
