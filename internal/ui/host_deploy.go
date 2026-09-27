@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/jhillyerd/labcoat/internal/nix"
 	"github.com/jhillyerd/labcoat/internal/runner"
 	"github.com/jhillyerd/labcoat/internal/store"
 )
@@ -18,10 +19,24 @@ type hostDeployMsg struct {
 	action string // nixos-rebuild action: "switch" or "boot".
 }
 
-// Sent when the runner has new output/status to display.
+// hostOutPathMsg delivers the system outPath resolved for one specific
+// deploy, keyed by that deploy's generation so resolutions arriving after a
+// newer deploy started are discarded.  An empty outPath reports that this
+// deploy's resolution failed, closing out any deferred GC-root registration.
+type hostOutPathMsg struct {
+	host    *hostModel
+	gen     int
+	outPath string
+}
+
+// Sent when the runner has new output/status to display.  runner and gen
+// identify the deployment that emitted the update, so completion handling
+// can discard finals superseded by a newer deploy.
 type hostDeployOutputMsg struct {
-	host  *hostModel
-	final bool
+	host   *hostModel
+	runner *runner.Model
+	gen    int
+	final  bool
 }
 
 func (m *Model) hostDeployCmd(host *hostModel, action string) tea.Cmd {
@@ -46,8 +61,11 @@ func (m *Model) handleHostDeployMsg(msg hostDeployMsg) tea.Cmd {
 		return nil
 	}
 
+	host.deploy.deployGen++ // Invalidate in-flight resolutions and completions.
+	deployGen := host.deploy.deployGen
+
 	onUpdate := func(r *runner.Model) tea.Msg {
-		return hostDeployOutputMsg{host: host, final: r.Closed()}
+		return hostDeployOutputMsg{host: host, runner: r, gen: deployGen, final: r.Closed()}
 	}
 
 	// Construct nixos-rebuild command line.
@@ -70,6 +88,9 @@ func (m *Model) handleHostDeployMsg(msg hostDeployMsg) tea.Cmd {
 	host.deploy.runner = srunner
 	host.deploy.cancel = cancel
 	host.deploy.fingerprint = m.flakeFingerprint // Capture current fingerprint.
+	host.deploy.outPath = ""                     // Resolved per deploy, binds the post-deploy GC root.
+	host.deploy.outPathDone = false              // Reset per deploy; empty outPath alone is ambiguous.
+	host.deploy.rootPending = false              // Superseded deploy's deferred root must not fire.
 
 	// Init status display.
 	intro := lipgloss.NewStyle().
@@ -84,7 +105,65 @@ func (m *Model) handleHostDeployMsg(msg hostDeployMsg) tea.Cmd {
 	}
 	logCmd := m.hostLogCmd(host, logText)
 	busyCmd := hostListIncrBusyCmd(host.name)
-	return tea.Batch(srunner.Init(m.program), logCmd, busyCmd)
+	outPathCmd := m.hostOutPathCmd(host, host.deploy.deployGen)
+	return tea.Batch(srunner.Init(m.program), logCmd, busyCmd, outPathCmd)
+}
+
+// hostOutPathCmd resolves the system outPath for host at deploy start,
+// concurrently with nixos-rebuild, so the GC root registered after a
+// successful deploy pins exactly the closure that deploy built instead of a
+// fresh evaluation of the (mutable) flake path, which could have drifted if
+// the flake changed during the build.  Always delivers a result message,
+// empty outPath on failure, so a deploy that completes first can defer its
+// GC-root registration until this resolves.
+func (m *Model) hostOutPathCmd(host *hostModel, gen int) tea.Cmd {
+	return func() tea.Msg {
+		const outPathTimeout = 60 * time.Second
+
+		ctx, done := context.WithTimeout(context.Background(), outPathTimeout)
+		defer done()
+
+		worker, err := m.nixPool.Get(ctx)
+		if err != nil {
+			slog.Warn("Failed to get nix worker for outPath resolution", "host", host.name, "err", err)
+			return hostOutPathMsg{host: host, gen: gen}
+		}
+		defer worker.Done()
+
+		outPath, err := nix.SystemOutPath(ctx, nix.OutPathRequest{
+			FlakePath: m.flakePath,
+			HostName:  host.name,
+		})
+		if err != nil {
+			slog.Warn("Failed to resolve system outPath for deploy",
+				"host", host.name, "worker", worker, "err", err)
+			return hostOutPathMsg{host: host, gen: gen}
+		}
+
+		return hostOutPathMsg{host: host, gen: gen, outPath: outPath}
+	}
+}
+
+func (m *Model) handleHostOutPathMsg(msg hostOutPathMsg) tea.Cmd {
+	// A newer deploy may have started since this resolution began; only the
+	// current generation may populate the field its GC root will read.
+	if msg.gen != msg.host.deploy.deployGen {
+		slog.Debug("Discarding outPath from superseded deploy", "host", msg.host.name)
+		return nil
+	}
+	msg.host.deploy.outPath = msg.outPath
+	msg.host.deploy.outPathDone = true
+
+	// A successful deploy may have completed before this resolution
+	// arrived; close out its deferred GC-root registration now.
+	if msg.host.deploy.rootPending {
+		msg.host.deploy.rootPending = false
+		if msg.outPath == "" {
+			return m.hostLogCmd(msg.host, "GC root not registered: system outPath resolution failed")
+		}
+		return m.wantHostRoot(msg.host, msg.outPath)
+	}
+	return nil
 }
 
 func (m *Model) handleHostDeployOutputMsg(msg hostDeployOutputMsg) tea.Cmd {
@@ -132,6 +211,29 @@ func (m *Model) handleHostDeployOutputMsg(msg hostDeployOutputMsg) tea.Cmd {
 		busyCmd := hostListDecrBusyCmd(host.name, status)
 
 		cmds = append(cmds, logCmd, busyCmd, m.fetchAllHostsBehindCmd())
+
+		// Register the deployed closure as a GC root so local garbage
+		// collection cannot delete it.  Non-fatal.  Only the outPath resolved
+		// for this deploy may be used, pinning the root to the closure this
+		// deploy built; if it has not arrived yet, registration is deferred to
+		// hostOutPathMsg rather than re-evaluating the (mutable) flake here.
+		if success {
+			// A newer deploy may have started before this completion was
+			// processed, replacing the runner and resetting outPath; only the
+			// current deployment may register a root (it does so on its own
+			// completion).
+			if msg.runner != host.deploy.runner || msg.gen != host.deploy.deployGen {
+				slog.Debug("Skipping GC root for superseded deploy completion", "host", host.name)
+			} else if host.deploy.outPath != "" {
+				cmds = append(cmds, m.wantHostRoot(host, host.deploy.outPath))
+			} else if host.deploy.outPathDone {
+				// Resolution already concluded empty (failed); non-fatal.
+				cmds = append(cmds, m.hostLogCmd(host, "GC root not registered: system outPath resolution failed"))
+			} else {
+				// Resolution still in flight; defer to handleHostOutPathMsg.
+				host.deploy.rootPending = true
+			}
+		}
 	} else {
 		// Schedule next update.
 		_, updateCmd := srunner.Update(nil)
@@ -157,6 +259,100 @@ func (m *Model) handleHostDeployOutputMsg(msg hostDeployOutputMsg) tea.Cmd {
 	panel.SetContent(output)
 	if follow {
 		panel.GotoBottom()
+	}
+
+	return tea.Batch(cmds...)
+}
+
+// gcRootResultMsg signals the outcome of GC root registration.  Carried as
+// text (not an error) because rooting failure must never fail a deploy.
+type gcRootResultMsg struct {
+	host *hostModel
+	text string
+}
+
+// wantHostRoot records that the current deployment's closure at outPath
+// should be pinned as host's GC root, starting the registration at once or
+// queueing it behind an in-flight one.  At most one registration runs per
+// host at a time and a queued want is replaced by any newer one, so
+// registrations apply oldest-first and the newest deployment always writes
+// the root last; a slow older registration can never overwrite it.
+func (m *Model) wantHostRoot(host *hostModel, outPath string) tea.Cmd {
+	if host.deploy.rootBusy {
+		host.deploy.rootWanted = outPath
+		return nil
+	}
+	host.deploy.rootBusy = true
+	return m.hostGCRootCmd(host, outPath)
+}
+
+// hostGCRootCmd registers host's deployed system closure as a GC root on the
+// control machine (issue #17).  nixos-rebuild does not pass --add-root, so
+// without this a local `nix-store --gc` can delete the running closure and
+// force a rebuild.  One root per host; the previous root is replaced.
+//
+// outPath is the system outPath captured when the deploy started, binding
+// the root to the closure that deploy built even if the flake has since
+// changed; callers must not pass an empty outPath — deferring registration
+// (or failing non-fatally) is handled by the deploy completion path, never a
+// fresh evaluation of the current flake.  Callers serialize registrations
+// per host via wantHostRoot, and every exit path must return a
+// gcRootResultMsg so the next queued registration is released.
+func (m *Model) hostGCRootCmd(host *hostModel, outPath string) tea.Cmd {
+	return func() tea.Msg {
+		if outPath == "" {
+			// Defensive: registration is deferred or skipped before this.
+			slog.Error("hostGCRootCmd called with empty outPath (bug)", "host", host.name)
+			return gcRootResultMsg{
+				host: host,
+				text: "GC root not registered: no system outPath for deploy",
+			}
+		}
+
+		const gcRootTimeout = 60 * time.Second
+
+		ctx, done := context.WithTimeout(context.Background(), gcRootTimeout)
+		defer done()
+
+		worker, err := m.nixPool.Get(ctx)
+		if err != nil {
+			slog.Warn("Failed to get nix worker for GC root", "host", host.name, "err", err)
+			return gcRootResultMsg{
+				host: host,
+				text: fmt.Sprintf("GC root not registered: %s", err),
+			}
+		}
+		defer worker.Done()
+
+		if err := nix.RegisterRoot(ctx, nix.RootsDir(m.config), host.name, outPath); err != nil {
+			slog.Warn("Failed to register GC root", "host", host.name,
+				"path", outPath, "worker", worker, "err", err)
+			return gcRootResultMsg{
+				host: host,
+				text: fmt.Sprintf("GC root not registered: %s", err),
+			}
+		}
+
+		slog.Info("Registered GC root", "host", host.name, "path", outPath, "worker", worker)
+		return gcRootResultMsg{
+			host: host,
+			text: fmt.Sprintf("GC root registered: %s", outPath),
+		}
+	}
+}
+
+func (m *Model) handleGCRootResultMsg(msg gcRootResultMsg) tea.Cmd {
+	host := msg.host
+	host.deploy.rootBusy = false
+	cmds := []tea.Cmd{m.hostLogCmd(host, msg.text)}
+
+	// Release a registration queued behind the one that just finished; it
+	// holds the most recently wanted outPath, so running it now cannot let
+	// an older deployment overwrite a newer deployment's root.
+	if path := host.deploy.rootWanted; path != "" {
+		host.deploy.rootWanted = ""
+		host.deploy.rootBusy = true
+		cmds = append(cmds, m.hostGCRootCmd(host, path))
 	}
 
 	return tea.Batch(cmds...)

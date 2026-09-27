@@ -33,6 +33,7 @@ type Hosts struct {
 
 type Nix struct {
 	DefaultBuildHost string `toml:"default-build-host" comment:"Default [user@]host to run Nix builds on"`
+	RootsDir         string `toml:"roots-dir" comment:"Directory for per-host GC roots (empty = $XDG_STATE_HOME or ~/.local/state/labcoat/roots)"`
 }
 
 // Default returns the default Config.

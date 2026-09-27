@@ -92,6 +92,12 @@ type hostModel struct {
 		runner       *runner.Model
 		cancel       func()
 		fingerprint  string // Captured at deploy start to avoid drift.
+		outPath      string // System outPath resolved at deploy start; binds the post-deploy GC root to the deployed closure.
+		outPathDone  bool   // Whether this deploy's outPath resolution concluded; empty outPath then means it failed.
+		rootPending  bool   // Successful deploy completed before its outPath resolved; register GC root when it arrives.
+		rootBusy     bool   // GC root registration subprocess in flight; at most one per host at a time.
+		rootWanted   string // outPath queued while rootBusy; a newer want replaces it, so the newest deploy roots last.
+		deployGen    int    // Deploy sequence number; discards late outPath resolutions from superseded deploys.
 	}
 	log struct {
 		contentPanel viewport.Model
@@ -431,11 +437,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case hostDeployOutputMsg:
 		return m, m.handleHostDeployOutputMsg(msg)
 
+	case gcRootResultMsg:
+		return m, m.handleGCRootResultMsg(msg)
+
 	case hostHoverMsg:
 		return m, m.handleHostHoverMsg(msg)
 
 	case hostLogUpdatedMsg:
 		return m, m.handleHostLogUpdatedMsg(msg)
+
+	case hostOutPathMsg:
+		return m, m.handleHostOutPathMsg(msg)
 
 	case hostRunCommandMsg:
 		return m, m.handleHostRunCommandMsg(msg)
