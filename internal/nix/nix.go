@@ -211,8 +211,12 @@ func GetFlakeMetadata(flakePath string) (*FlakeMetadata, error) {
 
 // nixRawEvalRunner shells out to `nix eval --raw` for url, killing the
 // subprocess when ctx is done.  Tests stub it to run without nix installed.
+// --no-eval-cache keeps this eval from contending on the per-flake eval-cache
+// database with concurrently running nix processes (e.g. nixos-rebuild at
+// deploy start), which otherwise emits "error (ignored): SQLite database ...
+// is busy" noise into their output.
 var nixRawEvalRunner = func(ctx context.Context, url string) ([]byte, error) {
-	return exec.CommandContext(ctx, "nix", "eval", "--raw", url).Output()
+	return exec.CommandContext(ctx, "nix", "eval", "--raw", "--no-eval-cache", url).Output()
 }
 
 func nixEval(flakeURL string, applyExpr string) ([]byte, error) {
