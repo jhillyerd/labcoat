@@ -95,6 +95,8 @@ type hostModel struct {
 		outPath      string // System outPath resolved at deploy start; binds the post-deploy GC root to the deployed closure.
 		outPathDone  bool   // Whether this deploy's outPath resolution concluded; empty outPath then means it failed.
 		rootPending  bool   // Successful deploy completed before its outPath resolved; register GC root when it arrives.
+		rootBusy     bool   // GC root registration subprocess in flight; at most one per host at a time.
+		rootWanted   string // outPath queued while rootBusy; a newer want replaces it, so the newest deploy roots last.
 		deployGen    int    // Deploy sequence number; discards late outPath resolutions from superseded deploys.
 	}
 	log struct {

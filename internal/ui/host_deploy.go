@@ -161,7 +161,7 @@ func (m *Model) handleHostOutPathMsg(msg hostOutPathMsg) tea.Cmd {
 		if msg.outPath == "" {
 			return m.hostLogCmd(msg.host, "GC root not registered: system outPath resolution failed")
 		}
-		return m.hostGCRootCmd(msg.host, msg.outPath)
+		return m.wantHostRoot(msg.host, msg.outPath)
 	}
 	return nil
 }
@@ -225,7 +225,7 @@ func (m *Model) handleHostDeployOutputMsg(msg hostDeployOutputMsg) tea.Cmd {
 			if msg.runner != host.deploy.runner || msg.gen != host.deploy.deployGen {
 				slog.Debug("Skipping GC root for superseded deploy completion", "host", host.name)
 			} else if host.deploy.outPath != "" {
-				cmds = append(cmds, m.hostGCRootCmd(host, host.deploy.outPath))
+				cmds = append(cmds, m.wantHostRoot(host, host.deploy.outPath))
 			} else if host.deploy.outPathDone {
 				// Resolution already concluded empty (failed); non-fatal.
 				cmds = append(cmds, m.hostLogCmd(host, "GC root not registered: system outPath resolution failed"))
@@ -271,6 +271,21 @@ type gcRootResultMsg struct {
 	text string
 }
 
+// wantHostRoot records that the current deployment's closure at outPath
+// should be pinned as host's GC root, starting the registration at once or
+// queueing it behind an in-flight one.  At most one registration runs per
+// host at a time and a queued want is replaced by any newer one, so
+// registrations apply oldest-first and the newest deployment always writes
+// the root last; a slow older registration can never overwrite it.
+func (m *Model) wantHostRoot(host *hostModel, outPath string) tea.Cmd {
+	if host.deploy.rootBusy {
+		host.deploy.rootWanted = outPath
+		return nil
+	}
+	host.deploy.rootBusy = true
+	return m.hostGCRootCmd(host, outPath)
+}
+
 // hostGCRootCmd registers host's deployed system closure as a GC root on the
 // control machine (issue #17).  nixos-rebuild does not pass --add-root, so
 // without this a local `nix-store --gc` can delete the running closure and
@@ -280,7 +295,9 @@ type gcRootResultMsg struct {
 // the root to the closure that deploy built even if the flake has since
 // changed; callers must not pass an empty outPath — deferring registration
 // (or failing non-fatally) is handled by the deploy completion path, never a
-// fresh evaluation of the current flake.
+// fresh evaluation of the current flake.  Callers serialize registrations
+// per host via wantHostRoot, and every exit path must return a
+// gcRootResultMsg so the next queued registration is released.
 func (m *Model) hostGCRootCmd(host *hostModel, outPath string) tea.Cmd {
 	return func() tea.Msg {
 		if outPath == "" {
@@ -300,7 +317,10 @@ func (m *Model) hostGCRootCmd(host *hostModel, outPath string) tea.Cmd {
 		worker, err := m.nixPool.Get(ctx)
 		if err != nil {
 			slog.Warn("Failed to get nix worker for GC root", "host", host.name, "err", err)
-			return nil
+			return gcRootResultMsg{
+				host: host,
+				text: fmt.Sprintf("GC root not registered: %s", err),
+			}
 		}
 		defer worker.Done()
 
@@ -322,5 +342,18 @@ func (m *Model) hostGCRootCmd(host *hostModel, outPath string) tea.Cmd {
 }
 
 func (m *Model) handleGCRootResultMsg(msg gcRootResultMsg) tea.Cmd {
-	return m.hostLogCmd(msg.host, msg.text)
+	host := msg.host
+	host.deploy.rootBusy = false
+	cmds := []tea.Cmd{m.hostLogCmd(host, msg.text)}
+
+	// Release a registration queued behind the one that just finished; it
+	// holds the most recently wanted outPath, so running it now cannot let
+	// an older deployment overwrite a newer deployment's root.
+	if path := host.deploy.rootWanted; path != "" {
+		host.deploy.rootWanted = ""
+		host.deploy.rootBusy = true
+		cmds = append(cmds, m.hostGCRootCmd(host, path))
+	}
+
+	return tea.Batch(cmds...)
 }
