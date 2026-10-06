@@ -22,6 +22,8 @@
 go.work
 
 .direnv
+.pi/hindsight
+.pi/mcp.json
 .vagrant
 debug.log
 result
